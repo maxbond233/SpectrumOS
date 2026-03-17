@@ -64,7 +64,7 @@ class Scheduler:
         if retried:
             logger.info("Retried %d failed tasks", retried)
 
-        # 2. Run all enabled agents concurrently (bounded by semaphore)
+        # 3. Run all enabled agents concurrently (bounded by semaphore)
         async def run_agent(name: str, agent: AgentBase) -> list[str]:
             async with self._semaphore:
                 try:
@@ -97,17 +97,22 @@ class Scheduler:
     async def _retry_failed_tasks(self) -> int:
         """Re-queue Waiting tasks that failed but haven't exceeded MAX_RETRIES.
 
-        Only retries tasks where review_needed is False (i.e. retry_count < 3).
-        Tasks with review_needed=True require human intervention.
+        Tasks that have exhausted retries (review_needed=True) are marked Failed.
+        Tasks waiting on dependencies are left alone.
         """
         waiting_tasks = await self._db.list_tasks(status="Waiting")
         retried = 0
         for task in waiting_tasks:
-            # Skip tasks waiting on dependencies (they have depends_on set)
+            # Skip tasks waiting on dependencies
             if task.depends_on:
                 continue
-            # Skip tasks that need human review (retry_count >= 3)
-            if task.review_needed:
+            # Exhausted retries → mark as Failed
+            if task.review_needed or (task.retry_count or 0) >= MAX_RETRIES:
+                await self._db.update_task(task.id, status="Failed")
+                logger.warning(
+                    "Task %s (%s) marked Failed after %d retries",
+                    task.id, task.name, task.retry_count or 0,
+                )
                 continue
             if (task.retry_count or 0) < MAX_RETRIES:
                 await self._db.update_task(task.id, status="Todo")

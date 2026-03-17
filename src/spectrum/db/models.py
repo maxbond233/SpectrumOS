@@ -119,7 +119,7 @@ class AgentTask(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="Todo")  # Inbox/Todo/Doing/Waiting/Done/Archived
+    status: Mapped[str] = mapped_column(String(50), default="Todo")  # Inbox/Todo/Doing/Waiting/Done/Failed/Archived
     priority: Mapped[str] = mapped_column(String(10), default="")
     type: Mapped[str] = mapped_column(String(50), default="")  # 采集/分析/沉淀/产出/协调
     assigned_agent: Mapped[str] = mapped_column(String(50), default="")
