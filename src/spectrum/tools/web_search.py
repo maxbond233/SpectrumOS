@@ -1,115 +1,117 @@
-"""Web search tool — Tavily / SerpAPI backend for the Focus agent."""
+"""Web search tool — multi-provider coordinator for the Focus agent."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
-from dataclasses import dataclass
-
-import httpx
+from urllib.parse import urlparse
 
 from spectrum.config import SearchConfig
+from spectrum.tools.content_extractor import ContentExtractor, PageContent, create_extractor
+from spectrum.tools.search_providers import (
+    SearchProvider,
+    SearchResult,
+    SemanticScholarProvider,
+    create_search_provider,
+)
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class SearchResult:
-    title: str
-    url: str
-    snippet: str
-    score: float = 0.0
+def _normalize_url(url: str) -> str:
+    """Normalize URL for dedup: strip scheme, trailing slash, www prefix."""
+    parsed = urlparse(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path.rstrip("/")
+    return f"{host}{path}"
 
 
-@dataclass
-class PageContent:
-    url: str
-    title: str
-    text: str
+def _dedup_results(results: list[SearchResult]) -> list[SearchResult]:
+    """Deduplicate by normalized URL. Boost score when multiple providers return same URL."""
+    seen: dict[str, SearchResult] = {}
+    for r in results:
+        if not r.url:
+            continue
+        key = _normalize_url(r.url)
+        if key in seen:
+            # Boost score for results found by multiple providers
+            seen[key].score = max(seen[key].score, r.score) + 0.1
+            # Keep richer snippet
+            if len(r.snippet) > len(seen[key].snippet):
+                seen[key].snippet = r.snippet
+        else:
+            seen[key] = r
+    return sorted(seen.values(), key=lambda r: r.score, reverse=True)
 
 
 class WebSearchTool:
-    """Unified web search interface. Supports Tavily (default) and SerpAPI."""
+    """Multi-provider search coordinator with content extraction."""
 
     def __init__(self, config: SearchConfig) -> None:
-        self._provider = config.provider
-        self._api_key = os.environ.get(config.api_key_env, "")
-        self._max_results = config.max_results
+        self._config = config
+        self._providers: list[SearchProvider] = []
+        self._academic_provider: SemanticScholarProvider | None = None
+        self._extractor: ContentExtractor = create_extractor(config.extractor)
+
+        for pc in config.providers:
+            if not pc.enabled:
+                continue
+            provider = create_search_provider(pc)
+            if provider is None:
+                continue
+            if isinstance(provider, SemanticScholarProvider):
+                self._academic_provider = provider
+            else:
+                self._providers.append(provider)
+
+        # If semantic_scholar wasn't in config but we need it, create a default
+        if self._academic_provider is None:
+            self._academic_provider = SemanticScholarProvider()
 
     async def search(self, query: str, max_results: int | None = None) -> list[SearchResult]:
-        """Search the web and return results."""
-        limit = max_results or self._max_results
-        if self._provider == "tavily":
-            return await self._tavily_search(query, limit)
-        elif self._provider == "serpapi":
-            return await self._serpapi_search(query, limit)
-        raise ValueError(f"Unknown search provider: {self._provider}")
+        """Search across all enabled non-academic providers concurrently, merge and dedup."""
+        if not self._providers:
+            logger.warning("No search providers configured")
+            return []
+
+        tasks = []
+        for provider in self._providers:
+            limit = max_results or self._config.providers[0].max_results
+            tasks.append(self._safe_search(provider, query, limit))
+
+        all_results: list[SearchResult] = []
+        for batch in await asyncio.gather(*tasks):
+            all_results.extend(batch)
+
+        deduped = _dedup_results(all_results)
+        if max_results:
+            deduped = deduped[:max_results]
+        return deduped
+
+    async def search_academic(self, query: str, max_results: int = 5) -> list[SearchResult]:
+        """Search academic sources only (Semantic Scholar)."""
+        if self._academic_provider is None:
+            return []
+        return await self._safe_search(self._academic_provider, query, max_results)
 
     async def fetch_page(self, url: str) -> PageContent:
-        """Fetch and extract main text content from a URL."""
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "SpectrumOS/0.1"})
-            resp.raise_for_status()
-            text = resp.text
-            # Basic extraction — strip HTML tags for plain text
-            import re
-            # Remove script/style blocks
-            text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", text, flags=re.DOTALL)
-            # Remove tags
-            text = re.sub(r"<[^>]+>", " ", text)
-            # Collapse whitespace
-            text = re.sub(r"\s+", " ", text).strip()
-            # Extract title
-            title_match = re.search(r"<title[^>]*>(.*?)</title>", resp.text, re.DOTALL)
-            title = title_match.group(1).strip() if title_match else url
-            return PageContent(url=url, title=title, text=text[:10000])
+        """Fetch and extract page content via configured extractor (Jina → regex fallback)."""
+        return await self._extractor.extract(url, self._config.extractor.max_content_length)
 
-    async def _tavily_search(self, query: str, max_results: int) -> list[SearchResult]:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": self._api_key,
-                    "query": query,
-                    "max_results": max_results,
-                    "include_answer": False,
-                },
+    async def _safe_search(
+        self, provider: SearchProvider, query: str, max_results: int
+    ) -> list[SearchResult]:
+        """Run a single provider search, catching errors."""
+        try:
+            results = await provider.search(query, max_results)
+            logger.info(
+                "Provider %s returned %d results for '%s'",
+                provider.name, len(results), query[:50],
             )
-            resp.raise_for_status()
-            data = resp.json()
-
-        results = []
-        for r in data.get("results", []):
-            results.append(SearchResult(
-                title=r.get("title", ""),
-                url=r.get("url", ""),
-                snippet=r.get("content", ""),
-                score=r.get("score", 0.0),
-            ))
-        return results
-
-    async def _serpapi_search(self, query: str, max_results: int) -> list[SearchResult]:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                "https://serpapi.com/search",
-                params={
-                    "api_key": self._api_key,
-                    "q": query,
-                    "num": max_results,
-                    "engine": "google",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        results = []
-        for r in data.get("organic_results", []):
-            results.append(SearchResult(
-                title=r.get("title", ""),
-                url=r.get("link", ""),
-                snippet=r.get("snippet", ""),
-            ))
-        return results
+            return results
+        except Exception as e:
+            logger.warning("Provider %s failed for '%s': %s", provider.name, query[:50], e)
+            return []
 
     def as_llm_tools(self) -> list[dict]:
         """Return tool definitions in Anthropic tool format for LLM function calling."""
@@ -134,8 +136,27 @@ class WebSearchTool:
                 },
             },
             {
+                "name": "search_academic",
+                "description": "搜索学术论文（Semantic Scholar）。返回论文标题、作者、摘要、引用数。",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "学术搜索关键词",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "最大结果数量",
+                            "default": 5,
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
                 "name": "fetch_page",
-                "description": "抓取指定 URL 的页面内容，提取正文文本。",
+                "description": "抓取指定 URL 的页面内容，提取正文文本（Markdown 格式）。",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -162,6 +183,26 @@ class WebSearchTool:
                 return "\n\n".join(
                     f"[{r.title}]({r.url})\n{r.snippet}" for r in results
                 )
+            elif tool_name == "search_academic":
+                results = await self.search_academic(
+                    arguments["query"],
+                    arguments.get("max_results", 5),
+                )
+                if not results:
+                    return "学术搜索无结果，请尝试其他关键词。"
+                lines = []
+                for r in results:
+                    meta = []
+                    if r.authors:
+                        meta.append(f"Authors: {r.authors}")
+                    if r.year:
+                        meta.append(f"Year: {r.year}")
+                    if r.citation_count is not None:
+                        meta.append(f"Citations: {r.citation_count}")
+                    lines.append(
+                        f"[{r.title}]({r.url})\n{' | '.join(meta)}\n{r.snippet}"
+                    )
+                return "\n\n".join(lines)
             elif tool_name == "fetch_page":
                 page = await self.fetch_page(arguments["url"])
                 return f"# {page.title}\n\n{page.text}"

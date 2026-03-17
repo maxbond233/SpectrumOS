@@ -22,9 +22,23 @@ llm:
     diffraction: {}
 
 search:
-  provider: "tavily"
-  api_key_env: "TAVILY_API_KEY"
-  max_results: 10
+  providers:
+    - name: "tavily"
+      api_key_env: "TAVILY_API_KEY"
+      max_results: 8
+    - name: "semantic_scholar"
+      max_results: 5
+    - name: "serpapi"
+      api_key_env: "SERPAPI_API_KEY"
+      max_results: 5
+    - name: "perplexity"
+      api_key_env: "PERPLEXITY_API_KEY"
+      max_results: 3
+      enabled: false
+  extractor:
+    provider: "jina"
+    max_content_length: 20000
+  max_search_rounds: 3
 
 scheduler:
   tick_interval: 30

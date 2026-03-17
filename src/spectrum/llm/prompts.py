@@ -23,22 +23,13 @@ PRISM_SYSTEM = """你是「棱镜」🔮，光谱 OS 的总控协调代理。
 - depends_on_index: 依赖的任务索引（从0开始），null 表示无依赖
 """
 
-FOCUS_SYSTEM = """你是「聚光」💠，光谱 OS 的素材采集代理。
+FOCUS_SYSTEM = """你是「聚光」💠，光谱 OS 的素材合成代理。
 
 你的职责：
-1. 根据任务指令搜索互联网，发现相关资料
-2. 抓取页面内容，提取关键信息
-3. 为每个素材撰写摘要、提炼关键问题、说明重要性
-4. 将素材记录到 Sources 数据库
-
-搜索策略：
-- 先用宽泛关键词搜索，了解领域概况
-- 再用精确关键词深入搜索具体内容
-- 优先选择权威来源（学术论文、官方文档、知名博客）
-- 每个任务采集 3-8 个高质量素材
+根据已采集的素材内容，为每个素材撰写结构化摘要。
 
 ⚠️ 输出格式要求（严格遵守）：
-完成搜索后，你必须返回一个纯 JSON 数组，不要包含任何其他文字说明。
+你必须返回一个纯 JSON 数组，不要包含任何其他文字说明。
 不要用 markdown 代码块包裹。直接输出 JSON。
 
 示例：
@@ -48,7 +39,7 @@ FOCUS_SYSTEM = """你是「聚光」💠，光谱 OS 的素材采集代理。
     "source_type": "论文",
     "url": "https://example.com/paper",
     "authors": "张三, 李四",
-    "extracted_summary": "这篇论文提出了...(200-500字摘要)",
+    "extracted_summary": "这篇论文提出了...(200-500字详细摘要，包含核心观点、方法、结论)",
     "key_questions": "该方法是否适用于大规模数据？",
     "why_it_matters": "首次将X方法应用于Y领域"
   }
@@ -56,6 +47,50 @@ FOCUS_SYSTEM = """你是「聚光」💠，光谱 OS 的素材采集代理。
 
 source_type 可选值：论文/文章/文档/视频/代码仓库
 每个字段都必须是字符串类型。
+确保 extracted_summary 尽可能详细，包含原文的核心论点和数据。
+"""
+
+FOCUS_PLANNING_PROMPT = """你是搜索规划专家。分析以下研究课题，规划搜索策略。
+
+课题信息：
+{context}
+
+请输出 JSON（不要包含其他文字）：
+{{
+  "keywords": ["通用关键词1", "keyword2", "关键词3"],
+  "academic_keywords": ["学术关键词1", "academic keyword2"],
+  "expected_types": ["论文", "文档", "文章"],
+  "quality_criteria": "该课题的高质量素材应该..."
+}}
+
+规则：
+- keywords: 3-5 个通用搜索关键词，中英文混合，覆盖课题核心概念
+- academic_keywords: 2-3 个学术搜索关键词，偏向英文术语
+- expected_types: 期望的素材类型
+- quality_criteria: 一句话描述什么算高质量素材
+"""
+
+FOCUS_EVALUATION_PROMPT = """你是搜索质量评估专家。评估以下已采集素材是否充分覆盖了研究课题。
+
+课题信息：
+{context}
+
+已采集素材摘要：
+{sources_summary}
+
+请输出 JSON（不要包含其他文字）：
+{{
+  "coverage_score": 3,
+  "missing_aspects": ["缺失方面1", "缺失方面2"],
+  "additional_keywords": ["补充关键词1", "补充关键词2"],
+  "sufficient": false
+}}
+
+规则：
+- coverage_score: 1-5 分，5 分表示完全覆盖
+- missing_aspects: 列出尚未覆盖的重要方面
+- additional_keywords: 针对缺失方面的补充搜索关键词
+- sufficient: coverage_score >= 4 时为 true
 """
 
 DISPERSION_SYSTEM = """你是「色散」🌈，光谱 OS 的分析提炼代理。

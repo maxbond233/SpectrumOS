@@ -48,10 +48,24 @@ class LLMConfig(BaseModel):
 
 # ── Search ───────────────────────────────────────────────────────────────────
 
+class SearchProviderConfig(BaseModel):
+    name: str = "tavily"
+    api_key_env: str = ""
+    max_results: int = 5
+    enabled: bool = True
+
+
+class ContentExtractorConfig(BaseModel):
+    provider: str = "jina"       # jina / regex
+    max_content_length: int = 20000
+
+
 class SearchConfig(BaseModel):
-    provider: str = "tavily"
-    api_key_env: str = "TAVILY_API_KEY"
-    max_results: int = 10
+    providers: list[SearchProviderConfig] = Field(default_factory=lambda: [
+        SearchProviderConfig(name="tavily", api_key_env="TAVILY_API_KEY", max_results=8),
+    ])
+    extractor: ContentExtractorConfig = Field(default_factory=ContentExtractorConfig)
+    max_search_rounds: int = 3
 
 
 # ── Scheduler ────────────────────────────────────────────────────────────────
@@ -102,9 +116,30 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return {}
 
 
+def _migrate_search_config(data: dict[str, Any]) -> dict[str, Any]:
+    """Backward compat: convert old flat search config to new providers list."""
+    search = data.get("search", {})
+    if not isinstance(search, dict):
+        return data
+    # Old format has "provider" key instead of "providers"
+    if "provider" in search and "providers" not in search:
+        old = search.copy()
+        provider_name = old.pop("provider", "tavily")
+        api_key_env = old.pop("api_key_env", "TAVILY_API_KEY")
+        max_results = old.pop("max_results", 10)
+        data["search"] = {
+            "providers": [
+                {"name": provider_name, "api_key_env": api_key_env, "max_results": max_results}
+            ],
+            **{k: v for k, v in old.items() if k not in ("provider", "api_key_env", "max_results")},
+        }
+    return data
+
+
 def load_settings() -> Settings:
     """Load settings from YAML + env vars."""
     yaml_data = _load_yaml(_CONFIG_DIR / "settings.yaml")
+    yaml_data = _migrate_search_config(yaml_data)
     return Settings(**yaml_data)
 
 
