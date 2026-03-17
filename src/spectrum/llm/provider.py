@@ -1,0 +1,303 @@
+"""LLM Provider abstraction — Anthropic + OpenAI-compatible dual protocol."""
+
+from __future__ import annotations
+
+import logging
+import os
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any
+
+import anthropic
+import openai
+
+from spectrum.config import LLMProviderConfig
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolCall:
+    name: str
+    arguments: dict[str, Any]
+    id: str = ""
+
+
+@dataclass
+class LLMResponse:
+    content: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: dict[str, int] = field(default_factory=dict)
+    stop_reason: str = ""
+
+
+class LLMProvider(ABC):
+    """Abstract base for LLM providers."""
+
+    @abstractmethod
+    async def complete(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.3,
+    ) -> LLMResponse: ...
+
+    @abstractmethod
+    async def complete_with_tool_loop(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_executor: Any | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.3,
+        max_rounds: int = 10,
+    ) -> LLMResponse:
+        """Run a complete-then-execute-tools loop until the model stops calling tools."""
+        ...
+
+
+class AnthropicProvider(LLMProvider):
+    """Claude API via Anthropic SDK."""
+
+    def __init__(self, config: LLMProviderConfig) -> None:
+        api_key = os.environ.get(config.api_key_env, "")
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        self._model = config.model
+
+    async def complete(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.3,
+    ) -> LLMResponse:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system,
+            "messages": messages,
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        resp = await self._client.messages.create(**kwargs)
+
+        content = ""
+        tool_calls = []
+        for block in resp.content:
+            if block.type == "text":
+                content += block.text
+            elif block.type == "tool_use":
+                tool_calls.append(ToolCall(
+                    name=block.name,
+                    arguments=block.input,
+                    id=block.id,
+                ))
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            usage={"input": resp.usage.input_tokens, "output": resp.usage.output_tokens},
+            stop_reason=resp.stop_reason,
+        )
+
+    async def complete_with_tool_loop(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_executor: Any | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.3,
+        max_rounds: int = 10,
+    ) -> LLMResponse:
+        msgs = list(messages)
+        final_response = LLMResponse()
+
+        for _ in range(max_rounds):
+            resp = await self.complete(system, msgs, tools, max_tokens, temperature)
+            final_response.usage = {
+                k: final_response.usage.get(k, 0) + resp.usage.get(k, 0)
+                for k in set(final_response.usage) | set(resp.usage)
+            }
+
+            if not resp.tool_calls or tool_executor is None:
+                final_response.content = resp.content
+                final_response.stop_reason = resp.stop_reason
+                return final_response
+
+            # Build assistant message with tool use blocks
+            assistant_content: list[dict[str, Any]] = []
+            if resp.content:
+                assistant_content.append({"type": "text", "text": resp.content})
+            for tc in resp.tool_calls:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.arguments,
+                })
+            msgs.append({"role": "assistant", "content": assistant_content})
+
+            # Execute tools and build tool_result message
+            tool_results: list[dict[str, Any]] = []
+            for tc in resp.tool_calls:
+                result = await tool_executor(tc.name, tc.arguments)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tc.id,
+                    "content": str(result),
+                })
+            msgs.append({"role": "user", "content": tool_results})
+
+        final_response.stop_reason = "max_rounds"
+        return final_response
+
+
+class OpenAICompatProvider(LLMProvider):
+    """OpenAI-compatible API (DeepSeek, Qwen, etc.)."""
+
+    def __init__(self, config: LLMProviderConfig) -> None:
+        api_key = os.environ.get(config.api_key_env, "")
+        base_url = config.base_url
+        if not base_url and config.base_url_env:
+            base_url = os.environ.get(config.base_url_env, "")
+        self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url or None)
+        self._model = config.model
+
+    async def complete(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.3,
+    ) -> LLMResponse:
+        oai_messages = [{"role": "system", "content": system}]
+        oai_messages.extend(messages)
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": oai_messages,
+        }
+        if tools:
+            # Convert Anthropic tool format to OpenAI function format
+            oai_tools = []
+            for t in tools:
+                oai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": t.get("input_schema", {}),
+                    },
+                })
+            kwargs["tools"] = oai_tools
+
+        resp = await self._client.chat.completions.create(**kwargs)
+        choice = resp.choices[0]
+
+        content = choice.message.content or ""
+        tool_calls = []
+        if choice.message.tool_calls:
+            import json
+            for tc in choice.message.tool_calls:
+                tool_calls.append(ToolCall(
+                    name=tc.function.name,
+                    arguments=json.loads(tc.function.arguments),
+                    id=tc.id,
+                ))
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            usage={
+                "input": resp.usage.prompt_tokens if resp.usage else 0,
+                "output": resp.usage.completion_tokens if resp.usage else 0,
+            },
+            stop_reason=choice.finish_reason or "",
+        )
+
+    async def complete_with_tool_loop(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_executor: Any | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.3,
+        max_rounds: int = 10,
+    ) -> LLMResponse:
+        import json
+
+        oai_messages = [{"role": "system", "content": system}]
+        oai_messages.extend(messages)
+        final_response = LLMResponse()
+
+        oai_tools = None
+        if tools:
+            oai_tools = [{
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {}),
+                },
+            } for t in tools]
+
+        for _ in range(max_rounds):
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": oai_messages,
+            }
+            if oai_tools:
+                kwargs["tools"] = oai_tools
+
+            resp = await self._client.chat.completions.create(**kwargs)
+            choice = resp.choices[0]
+
+            if resp.usage:
+                final_response.usage = {
+                    "input": final_response.usage.get("input", 0) + resp.usage.prompt_tokens,
+                    "output": final_response.usage.get("output", 0) + resp.usage.completion_tokens,
+                }
+
+            if not choice.message.tool_calls or tool_executor is None:
+                final_response.content = choice.message.content or ""
+                final_response.stop_reason = choice.finish_reason or ""
+                return final_response
+
+            # Append assistant message with tool calls
+            oai_messages.append(choice.message.model_dump())
+
+            # Execute tools
+            for tc in choice.message.tool_calls:
+                args = json.loads(tc.function.arguments)
+                result = await tool_executor(tc.function.name, args)
+                oai_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": str(result),
+                })
+
+        final_response.stop_reason = "max_rounds"
+        return final_response
+
+
+def create_provider(config: LLMProviderConfig) -> LLMProvider:
+    """Factory: create the right provider from config."""
+    if config.provider == "anthropic":
+        return AnthropicProvider(config)
+    elif config.provider == "openai_compat":
+        return OpenAICompatProvider(config)
+    else:
+        raise ValueError(f"Unknown LLM provider: {config.provider}")

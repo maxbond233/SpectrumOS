@@ -1,0 +1,45 @@
+# 光谱 OS Agent System Configuration
+
+database:
+  url: "sqlite+aiosqlite:///data/spectrum.db"
+
+llm:
+  default:
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: null
+    max_tokens: 4096
+    temperature: 0.3
+
+  agents:
+    prism:
+      provider: "anthropic"
+      model: "claude-sonnet-4-20250514"
+    focus:
+      provider: "openai_compat"
+      model: "deepseek-chat"
+      api_key_env: "OPENAI_COMPAT_API_KEY"
+      base_url_env: "OPENAI_COMPAT_BASE_URL"
+    dispersion: {}
+    diffraction: {}
+
+search:
+  provider: "tavily"
+  api_key_env: "TAVILY_API_KEY"
+  max_results: 10
+
+scheduler:
+  tick_interval: 30
+  max_concurrent_agents: 3
+
+agents:
+  enabled:
+    - prism
+    - focus
+    - dispersion
+    - diffraction
+
+api:
+  host: "0.0.0.0"
+  port: 8078
