@@ -87,15 +87,33 @@ class DiffractionAgent(AgentBase):
                 task.id,
                 message=f"已产出文稿: {output_data['name']}",
             )
+        else:
+            await self.db.update_task(
+                task.id,
+                ai_notes=response.content[:500] if response.content else "",
+            )
+            raise RuntimeError(
+                f"未能从 LLM 响应中解析出文稿 (响应长度: {len(response.content or '')})"
+            )
 
         return events
 
     def _parse_output(
         self, content: str, project_ref: int | None, output_type: str
     ) -> dict | None:
-        """Parse LLM response into an output dict."""
+        """Parse LLM response into an output dict.
+
+        Falls back to wrapping raw content as output if JSON parsing fails.
+        """
         text = content.strip()
+
+        # Try to extract JSON object from markdown code blocks or raw text
         if "```" in text:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                text = text[start:end]
+        elif not text.startswith("{"):
             start = text.find("{")
             end = text.rfind("}") + 1
             if start >= 0 and end > start:
@@ -104,7 +122,23 @@ class DiffractionAgent(AgentBase):
         try:
             raw = json.loads(text)
         except json.JSONDecodeError:
-            self.logger.warning("Failed to parse output from LLM response")
+            self.logger.warning(
+                "Failed to parse output from LLM response: %s", content[:200]
+            )
+            # Fallback: wrap raw content as output
+            if len(content.strip()) > 50:
+                self.logger.info("Creating fallback output from raw LLM response")
+                return {
+                    "name": f"文稿草稿 — 课题 {project_ref or '未知'}",
+                    "type": output_type,
+                    "status": "进行中",
+                    "project_ref": project_ref,
+                    "assigned_agent": "diffraction",
+                    "word_count": len(content),
+                    "content": content,
+                    "ai_notes": "JSON 解析失败，已保留原始 LLM 输出",
+                    "review_needed": True,
+                }
             return None
 
         word_count = raw.get("word_count", 0)

@@ -83,11 +83,13 @@ class AgentBase(ABC):
 
             except Exception as e:
                 self.logger.exception("Failed to process task %s: %s", task.name, e)
+                new_retry = (task.retry_count or 0) + 1
                 await self.db.update_task(
                     task.id,
                     status="Waiting",
-                    review_needed=True,
-                    ai_notes=f"处理失败: {e}",
+                    review_needed=new_retry >= 3,  # 3次以上才需人工审核
+                    retry_count=new_retry,
+                    ai_notes=f"处理失败 (第{new_retry}次): {e}",
                 )
                 await self.activity_logger.log(
                     actor=self.agent_name,
@@ -97,8 +99,8 @@ class AgentBase(ABC):
                     target_record=str(task.id),
                     before="Doing",
                     after="Waiting",
-                    needs_review=True,
-                    notes=str(e),
+                    needs_review=new_retry >= 3,
+                    notes=f"第{new_retry}次失败: {e}",
                 )
 
         return events

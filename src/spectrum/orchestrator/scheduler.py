@@ -11,6 +11,8 @@ from spectrum.orchestrator.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
+MAX_RETRIES = 3
+
 
 class Scheduler:
     """Runs the main tick loop: resolve deps → run agents → emit events."""
@@ -57,6 +59,11 @@ class Scheduler:
         if unlocked:
             logger.info("Unlocked %d waiting tasks", unlocked)
 
+        # 2. Retry failed tasks that haven't exceeded max retries
+        retried = await self._retry_failed_tasks()
+        if retried:
+            logger.info("Retried %d failed tasks", retried)
+
         # 2. Run all enabled agents concurrently (bounded by semaphore)
         async def run_agent(name: str, agent: AgentBase) -> list[str]:
             async with self._semaphore:
@@ -86,3 +93,27 @@ class Scheduler:
         events = await agent.tick()
         await self._event_bus.emit_many(events)
         return events
+
+    async def _retry_failed_tasks(self) -> int:
+        """Re-queue Waiting tasks that failed but haven't exceeded MAX_RETRIES.
+
+        Only retries tasks where review_needed is False (i.e. retry_count < 3).
+        Tasks with review_needed=True require human intervention.
+        """
+        waiting_tasks = await self._db.list_tasks(status="Waiting")
+        retried = 0
+        for task in waiting_tasks:
+            # Skip tasks waiting on dependencies (they have depends_on set)
+            if task.depends_on:
+                continue
+            # Skip tasks that need human review (retry_count >= 3)
+            if task.review_needed:
+                continue
+            if (task.retry_count or 0) < MAX_RETRIES:
+                await self._db.update_task(task.id, status="Todo")
+                logger.info(
+                    "Re-queued task %s (%s) for retry #%d",
+                    task.id, task.name, (task.retry_count or 0) + 1,
+                )
+                retried += 1
+        return retried

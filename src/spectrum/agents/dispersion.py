@@ -64,6 +64,15 @@ class DispersionAgent(AgentBase):
         # Parse wiki cards
         cards = self._parse_cards(response.content, task.project_ref)
 
+        if not cards:
+            await self.db.update_task(
+                task.id,
+                ai_notes=response.content[:500] if response.content else "",
+            )
+            raise RuntimeError(
+                f"未能从 LLM 响应中解析出任何知识卡片 (响应长度: {len(response.content or '')})"
+            )
+
         for card_data in cards:
             created = await self.db.create_wiki_card(**card_data)
             await self.activity_logger.log(
@@ -96,9 +105,19 @@ class DispersionAgent(AgentBase):
         return events
 
     def _parse_cards(self, content: str, project_ref: int | None) -> list[dict]:
-        """Parse LLM response into wiki card dicts."""
+        """Parse LLM response into wiki card dicts.
+
+        Falls back to a single card from raw content if JSON parsing fails.
+        """
         text = content.strip()
+
+        # Try to extract JSON array from markdown code blocks or raw text
         if "```" in text:
+            start = text.find("[")
+            end = text.rfind("]") + 1
+            if start >= 0 and end > start:
+                text = text[start:end]
+        elif not text.startswith("["):
             start = text.find("[")
             end = text.rfind("]") + 1
             if start >= 0 and end > start:
@@ -106,8 +125,27 @@ class DispersionAgent(AgentBase):
 
         try:
             raw = json.loads(text)
+            if not isinstance(raw, list):
+                raw = [raw]
         except json.JSONDecodeError:
-            self.logger.warning("Failed to parse wiki cards from LLM response")
+            self.logger.warning(
+                "Failed to parse wiki cards from LLM response: %s", content[:200]
+            )
+            # Fallback: create a single card from raw content
+            if len(content.strip()) > 50:
+                self.logger.info("Creating fallback wiki card from raw LLM response")
+                return [{
+                    "concept": f"分析笔记 — 课题 {project_ref or '未知'}",
+                    "type": "概念",
+                    "domain": "",
+                    "definition": content[:200],
+                    "explanation": content[:2000],
+                    "key_points": "",
+                    "example": "",
+                    "maturity": "Seed",
+                    "project_ref": project_ref,
+                    "assigned_agent": "dispersion",
+                }]
             return []
 
         cards = []

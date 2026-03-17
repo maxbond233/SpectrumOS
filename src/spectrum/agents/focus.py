@@ -64,6 +64,15 @@ class FocusAgent(AgentBase):
         # Parse sources from LLM response
         sources = self._parse_sources(response.content, task.project_ref)
 
+        if not sources:
+            await self.db.update_task(
+                task.id,
+                ai_notes=response.content[:500] if response.content else "",
+            )
+            raise RuntimeError(
+                f"未能从 LLM 响应中解析出任何素材 (响应长度: {len(response.content or '')})"
+            )
+
         for source_data in sources:
             created = await self.db.create_source(**source_data)
             await self.activity_logger.log(
@@ -85,9 +94,20 @@ class FocusAgent(AgentBase):
         return events
 
     def _parse_sources(self, content: str, project_ref: int | None) -> list[dict]:
-        """Parse LLM response into source dicts."""
+        """Parse LLM response into source dicts.
+
+        Falls back to creating a single source from raw content if JSON parsing fails.
+        """
         text = content.strip()
+
+        # Try to extract JSON array from markdown code blocks or raw text
         if "```" in text:
+            start = text.find("[")
+            end = text.rfind("]") + 1
+            if start >= 0 and end > start:
+                text = text[start:end]
+        elif not text.startswith("["):
+            # Try to find JSON array anywhere in the text
             start = text.find("[")
             end = text.rfind("]") + 1
             if start >= 0 and end > start:
@@ -95,18 +115,22 @@ class FocusAgent(AgentBase):
 
         try:
             raw = json.loads(text)
+            if not isinstance(raw, list):
+                raw = [raw]
         except json.JSONDecodeError:
-            self.logger.warning(f"Failed to parse source list from LLM response: {content[:200]}")
-            # 如果解析失败，尝试从内容中提取基本信息创建简单 source
-            if len(content) > 50:
-                self.logger.info("Creating fallback source from LLM response")
+            self.logger.warning(
+                "Failed to parse source list from LLM response: %s", content[:200]
+            )
+            # Fallback: wrap the raw LLM content as a single source
+            if len(content.strip()) > 50:
+                self.logger.info("Creating fallback source from raw LLM response")
                 return [{
-                    "title": f"采集素材 - {project_ref}",
+                    "title": f"采集素材 — {project_ref or '未知课题'}",
                     "source_type": "web",
                     "status": "Collected",
                     "url": "",
                     "authors": "",
-                    "extracted_summary": content[:1000],
+                    "extracted_summary": content[:2000],
                     "key_questions": "",
                     "why_it_matters": "",
                     "project_ref": project_ref,

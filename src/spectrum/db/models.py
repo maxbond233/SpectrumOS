@@ -128,6 +128,7 @@ class AgentTask(Base):
     project_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_notes: Mapped[str] = mapped_column(Text, default="")
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
     review_needed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
