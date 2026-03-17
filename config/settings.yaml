@@ -1,26 +1,23 @@
 # 光谱 OS Agent System Configuration
 
 database:
-  url: "sqlite+aiosqlite:///data/spectrum.db"
+  url: "sqlite+aiosqlite:////opt/SpectrumOS/data/spectrum.db"
 
 llm:
   default:
-    provider: "anthropic"
-    model: "claude-sonnet-4-20250514"
-    api_key_env: "ANTHROPIC_API_KEY"
-    base_url: null
+    provider: "openai_compat"
+    model: "claude-sonnet-4-5-20250929"
+    api_key_env: "CLAUDE_API_KEY"
+    base_url_env: "CLAUDE_BASE_URL"
     max_tokens: 4096
     temperature: 0.3
 
   agents:
-    prism:
-      provider: "anthropic"
-      model: "claude-sonnet-4-20250514"
+    prism: {}
     focus:
-      provider: "openai_compat"
-      model: "deepseek-chat"
-      api_key_env: "OPENAI_COMPAT_API_KEY"
-      base_url_env: "OPENAI_COMPAT_BASE_URL"
+      model: "deepseek-v3.2"
+      api_key_env: "DEEPSEEK_API_KEY"
+      base_url_env: "DEEPSEEK_BASE_URL"
     dispersion: {}
     diffraction: {}
 

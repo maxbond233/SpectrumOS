@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-import anthropic
 import openai
 
 from spectrum.config import LLMProviderConfig
@@ -57,106 +56,6 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """Run a complete-then-execute-tools loop until the model stops calling tools."""
         ...
-
-
-class AnthropicProvider(LLMProvider):
-    """Claude API via Anthropic SDK."""
-
-    def __init__(self, config: LLMProviderConfig) -> None:
-        api_key = os.environ.get(config.api_key_env, "")
-        self._client = anthropic.AsyncAnthropic(api_key=api_key)
-        self._model = config.model
-
-    async def complete(
-        self,
-        system: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.3,
-    ) -> LLMResponse:
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "system": system,
-            "messages": messages,
-        }
-        if tools:
-            kwargs["tools"] = tools
-
-        resp = await self._client.messages.create(**kwargs)
-
-        content = ""
-        tool_calls = []
-        for block in resp.content:
-            if block.type == "text":
-                content += block.text
-            elif block.type == "tool_use":
-                tool_calls.append(ToolCall(
-                    name=block.name,
-                    arguments=block.input,
-                    id=block.id,
-                ))
-
-        return LLMResponse(
-            content=content,
-            tool_calls=tool_calls,
-            usage={"input": resp.usage.input_tokens, "output": resp.usage.output_tokens},
-            stop_reason=resp.stop_reason,
-        )
-
-    async def complete_with_tool_loop(
-        self,
-        system: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        tool_executor: Any | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.3,
-        max_rounds: int = 10,
-    ) -> LLMResponse:
-        msgs = list(messages)
-        final_response = LLMResponse()
-
-        for _ in range(max_rounds):
-            resp = await self.complete(system, msgs, tools, max_tokens, temperature)
-            final_response.usage = {
-                k: final_response.usage.get(k, 0) + resp.usage.get(k, 0)
-                for k in set(final_response.usage) | set(resp.usage)
-            }
-
-            if not resp.tool_calls or tool_executor is None:
-                final_response.content = resp.content
-                final_response.stop_reason = resp.stop_reason
-                return final_response
-
-            # Build assistant message with tool use blocks
-            assistant_content: list[dict[str, Any]] = []
-            if resp.content:
-                assistant_content.append({"type": "text", "text": resp.content})
-            for tc in resp.tool_calls:
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": tc.id,
-                    "name": tc.name,
-                    "input": tc.arguments,
-                })
-            msgs.append({"role": "assistant", "content": assistant_content})
-
-            # Execute tools and build tool_result message
-            tool_results: list[dict[str, Any]] = []
-            for tc in resp.tool_calls:
-                result = await tool_executor(tc.name, tc.arguments)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tc.id,
-                    "content": str(result),
-                })
-            msgs.append({"role": "user", "content": tool_results})
-
-        final_response.stop_reason = "max_rounds"
-        return final_response
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -295,9 +194,7 @@ class OpenAICompatProvider(LLMProvider):
 
 def create_provider(config: LLMProviderConfig) -> LLMProvider:
     """Factory: create the right provider from config."""
-    if config.provider == "anthropic":
-        return AnthropicProvider(config)
-    elif config.provider == "openai_compat":
+    if config.provider == "openai_compat":
         return OpenAICompatProvider(config)
     else:
         raise ValueError(f"Unknown LLM provider: {config.provider}")

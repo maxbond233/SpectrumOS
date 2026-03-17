@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/spectrum-os
-EnvironmentFile=/opt/spectrum-os/.env
+WorkingDirectory=/opt/SpectrumOS
+EnvironmentFile=/opt/SpectrumOS/.env
 ExecStart=/usr/bin/python3 -m spectrum.main
 Restart=always
 RestartSec=5

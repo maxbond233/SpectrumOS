@@ -24,11 +24,11 @@ class DatabaseConfig(BaseModel):
 # ── LLM ──────────────────────────────────────────────────────────────────────
 
 class LLMProviderConfig(BaseModel):
-    provider: str = "anthropic"
+    provider: str = "openai_compat"
     model: str = "claude-sonnet-4-20250514"
-    api_key_env: str = "ANTHROPIC_API_KEY"
+    api_key_env: str = "CLAUDE_API_KEY"
     base_url: str | None = None
-    base_url_env: str | None = None
+    base_url_env: str | None = "CLAUDE_BASE_URL"
     max_tokens: int = 4096
     temperature: float = 0.3
 
@@ -79,9 +79,10 @@ class AgentsConfig(BaseModel):
 # ── Root Settings ────────────────────────────────────────────────────────────
 
 class Settings(BaseSettings):
-    anthropic_api_key: str = ""
-    openai_compat_api_key: str = ""
-    openai_compat_base_url: str = ""
+    claude_api_key: str = ""
+    claude_base_url: str = ""
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = ""
     tavily_api_key: str = ""
 
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
