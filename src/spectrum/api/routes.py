@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse, Response
 
 from spectrum.api.schemas import (
     AgentInfo,
@@ -18,6 +19,7 @@ from spectrum.api.schemas import (
     PaginatedResponse,
     ProjectDetailResponse,
     ProjectResponse,
+    ReviewItemResponse,
     SourceDetailResponse,
     SourceResponse,
     StatsResponse,
@@ -26,7 +28,11 @@ from spectrum.api.schemas import (
     TaskResponse,
     TriggerAgentRequest,
     TriggerResponse,
+    UpdateOutputRequest,
+    UpdateProjectRequest,
+    UpdateSourceRequest,
     UpdateTaskRequest,
+    UpdateWikiCardRequest,
     WikiCardDetailResponse,
     WikiCardResponse,
 )
@@ -50,6 +56,13 @@ def configure(
     _scheduler = scheduler
     _db = db
     _activity_logger = activity_logger
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+def _dt(val) -> str:
+    """Convert datetime to ISO string, or empty string if None."""
+    return val.isoformat() if val else ""
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
@@ -338,11 +351,169 @@ async def update_task(task_id: int, req: UpdateTaskRequest):
     return {"id": updated.id, "name": updated.name, "status": updated.status, "review_needed": updated.review_needed}
 
 
-# ── Explorer: helpers ────────────────────────────────────────────────────────
+# ── Update Project (intervention) ────────────────────────────────────────
 
-def _dt(val) -> str:
-    """Convert datetime to ISO string, or empty string if None."""
-    return val.isoformat() if val else ""
+@router.patch("/projects/{project_id}")
+async def update_project(project_id: int, req: UpdateProjectRequest):
+    project = await _db.get_project(project_id)
+    if not project:
+        raise HTTPException(404, f"Project {project_id} not found")
+
+    fields: dict = {}
+    if req.status is not None:
+        fields["status"] = req.status
+    if req.priority is not None:
+        fields["priority"] = req.priority
+    if req.review_needed is not None:
+        fields["review_needed"] = req.review_needed
+
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+
+    updated = await _db.update_project(project_id, **fields)
+    await _activity_logger.log(
+        actor="human",
+        action_type="Update",
+        target_db="Research Projects",
+        description=f"手动更新课题 #{project_id}",
+        target_record=str(project_id),
+        before=project.status,
+        after=fields.get("status", project.status),
+        needs_review=True,
+    )
+    return {"id": updated.id, "name": updated.name, "status": updated.status, "review_needed": updated.review_needed}
+
+
+# ── Update Source (intervention) ─────────────────────────────────────────
+
+@router.patch("/sources/{source_id}")
+async def update_source(source_id: int, req: UpdateSourceRequest):
+    source = await _db.get_source(source_id)
+    if not source:
+        raise HTTPException(404, f"Source {source_id} not found")
+
+    fields: dict = {}
+    if req.status is not None:
+        fields["status"] = req.status
+    if req.priority is not None:
+        fields["priority"] = req.priority
+    if req.review_needed is not None:
+        fields["review_needed"] = req.review_needed
+
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+
+    updated = await _db.update_source(source_id, **fields)
+    await _activity_logger.log(
+        actor="human",
+        action_type="Update",
+        target_db="Sources",
+        description=f"手动更新素材 #{source_id}",
+        target_record=str(source_id),
+        before=source.status,
+        after=fields.get("status", source.status),
+        needs_review=True,
+    )
+    return {"id": updated.id, "title": updated.title, "status": updated.status, "review_needed": updated.review_needed}
+
+
+# ── Update WikiCard (intervention) ───────────────────────────────────────
+
+@router.patch("/wiki-cards/{card_id}")
+async def update_wiki_card(card_id: int, req: UpdateWikiCardRequest):
+    card = await _db.get_wiki_card(card_id)
+    if not card:
+        raise HTTPException(404, f"WikiCard {card_id} not found")
+
+    fields: dict = {}
+    if req.maturity is not None:
+        fields["maturity"] = req.maturity
+    if req.needs_review is not None:
+        fields["needs_review"] = req.needs_review
+
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+
+    updated = await _db.update_wiki_card(card_id, **fields)
+    await _activity_logger.log(
+        actor="human",
+        action_type="Update",
+        target_db="Wiki Cards",
+        description=f"手动更新知识卡 #{card_id}",
+        target_record=str(card_id),
+        before=card.maturity,
+        after=fields.get("maturity", card.maturity),
+        needs_review=True,
+    )
+    return {"id": updated.id, "concept": updated.concept, "maturity": updated.maturity, "needs_review": updated.needs_review}
+
+
+# ── Update Output (intervention) ─────────────────────────────────────────
+
+@router.patch("/outputs/{output_id}")
+async def update_output(output_id: int, req: UpdateOutputRequest):
+    output = await _db.get_output(output_id)
+    if not output:
+        raise HTTPException(404, f"Output {output_id} not found")
+
+    fields: dict = {}
+    if req.status is not None:
+        fields["status"] = req.status
+    if req.review_needed is not None:
+        fields["review_needed"] = req.review_needed
+
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+
+    updated = await _db.update_output(output_id, **fields)
+    await _activity_logger.log(
+        actor="human",
+        action_type="Update",
+        target_db="Outputs",
+        description=f"手动更新产出 #{output_id}",
+        target_record=str(output_id),
+        before=output.status,
+        after=fields.get("status", output.status),
+        needs_review=True,
+    )
+    return {"id": updated.id, "name": updated.name, "status": updated.status, "review_needed": updated.review_needed}
+
+
+# ── Reviews (unified list) ───────────────────────────────────────────────
+
+@router.get("/reviews", response_model=list[ReviewItemResponse])
+async def list_reviews():
+    items: list[ReviewItemResponse] = []
+
+    for p in await _db.list_projects(review_needed=True):
+        items.append(ReviewItemResponse(
+            id=p.id, table="projects", title=p.name,
+            status=p.status, created_at=_dt(p.created_at), updated_at=_dt(p.updated_at),
+        ))
+    for s in await _db.list_sources(review_needed=True):
+        items.append(ReviewItemResponse(
+            id=s.id, table="sources", title=s.title,
+            status=s.status, created_at=_dt(s.created_at), updated_at=_dt(s.updated_at),
+        ))
+    for w in await _db.list_wiki_cards(needs_review=True):
+        items.append(ReviewItemResponse(
+            id=w.id, table="wiki_cards", title=w.concept,
+            status=w.maturity, created_at=_dt(w.created_at), updated_at=_dt(w.updated_at),
+        ))
+    for o in await _db.list_outputs(review_needed=True):
+        items.append(ReviewItemResponse(
+            id=o.id, table="outputs", title=o.name,
+            status=o.status, created_at=_dt(o.created_at), updated_at=_dt(o.updated_at),
+        ))
+    for t in await _db.list_tasks(review_needed=True):
+        items.append(ReviewItemResponse(
+            id=t.id, table="tasks", title=t.name,
+            status=t.status, created_at=_dt(t.created_at), updated_at=_dt(t.updated_at),
+        ))
+
+    items.sort(key=lambda x: x.updated_at, reverse=True)
+    return items
+
 
 
 # ── Explorer: Sources ────────────────────────────────────────────────────────
@@ -494,6 +665,59 @@ async def get_output(output_id: int):
         ai_notes=o.ai_notes, assigned_agent=o.assigned_agent,
         updated_at=_dt(o.updated_at),
     )
+
+
+# ── Output download / render ─────────────────────────────────────────────
+
+@router.get("/outputs/{output_id}/markdown")
+async def download_output_markdown(output_id: int):
+    o = await _db.get_output(output_id)
+    if not o:
+        raise HTTPException(404, f"Output {output_id} not found")
+    filename = f"{o.name or f'output-{o.id}'}.md"
+    return Response(
+        content=o.content or "",
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/outputs/{output_id}/html", response_class=HTMLResponse)
+async def render_output_html(output_id: int):
+    import markdown as md
+
+    o = await _db.get_output(output_id)
+    if not o:
+        raise HTTPException(404, f"Output {output_id} not found")
+
+    body = md.markdown(o.content or "", extensions=["tables", "fenced_code", "toc"])
+    title = o.name or f"Output #{o.id}"
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+  body {{ max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font-family: -apple-system, "Noto Sans SC", sans-serif; line-height: 1.8; color: #1a1a1a; }}
+  h1, h2, h3 {{ margin-top: 1.6em; }}
+  pre {{ background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 4px; }}
+  code {{ font-size: 0.9em; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
+  th, td {{ border: 1px solid #ddd; padding: 0.5em 0.75em; text-align: left; }}
+  th {{ background: #f9f9f9; }}
+  blockquote {{ border-left: 4px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #555; }}
+  @media print {{ body {{ max-width: 100%; margin: 0; }} }}
+</style>
+</head>
+<body>
+<h1>{title}</h1>
+{body}
+<hr>
+<p style="color:#999; font-size:0.85em;">光谱 OS · {o.type or "Output"} · {_dt(o.updated_at)}</p>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
 
 
 # ── Explorer: Projects detail ────────────────────────────────────────────────

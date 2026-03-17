@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>光谱 OS · Explorer</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -130,6 +131,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
       <div class="nav-item" data-view="outputs"><span class="emoji">📄</span><span>产出 Outputs</span></div>
       <div class="nav-item" data-view="tasks"><span class="emoji">🎯</span><span>任务 Tasks</span></div>
       <div class="nav-item" data-view="logs"><span class="emoji">📋</span><span>活动日志 Logs</span></div>
+      <div class="nav-item" data-view="reviews"><span class="emoji">✅</span><span>Reviews</span></div>
     </aside>
     <main id="content" class="content"></main>
   </div>
@@ -150,6 +152,7 @@ const STATE = {
   outputs:{limit:20,offset:0,filters:{status:'',type:'',project_ref:''},lastItems:[]},
   tasks:{limit:20,offset:0,filters:{status:'',agent:'',type:'',project_ref:''},lastItems:[]},
   logs:{limit:50,offset:0,filters:{actor:'',action_type:'',target_db:''},lastItems:[]},
+  reviews:{lastItems:[]},
 };
 
 function setActiveNav(view){
@@ -167,6 +170,29 @@ function formatDate(iso){
   if(!iso) return '';
   try{
     return new Date(iso).toLocaleString('zh-CN');
+  }catch(e){return iso;}
+}
+
+function timeAgo(iso){
+  if(!iso) return '';
+  try{
+    const now = Date.now();
+    const t = new Date(iso).getTime();
+    const diff = Math.max(0, now - t);
+    const sec = Math.floor(diff/1000);
+    if(sec<60) return `${sec} 秒前`;
+    const min = Math.floor(sec/60);
+    if(min<60) return `${min} 分钟前`;
+    const h = Math.floor(min/60);
+    if(h<24) return `${h} 小时前`;
+    const d = Math.floor(h/24);
+    if(d<7) return `${d} 天前`;
+    const w = Math.floor(d/7);
+    if(w<4) return `${w} 周前`;
+    const m = Math.floor(d/30);
+    if(m<12) return `${m} 个月前`;
+    const y = Math.floor(d/365);
+    return `${y} 年前`;
   }catch(e){return iso;}
 }
 
@@ -315,6 +341,85 @@ function renderList(view){
     document.getElementById('f-log-action').onchange = e=>{st.filters.action_type=e.target.value;st.offset=0;renderList('logs');};
     document.getElementById('f-log-db').onchange = e=>{st.filters.target_db=e.target.value;st.offset=0;renderList('logs');};
     loadLogs();
+  }else if(view==='reviews'){
+    content.innerHTML = `
+      <div class="filter-bar">
+        <span class="filter-label">待 Review 项</span>
+      </div>
+      <div id="list-area"></div>
+    `;
+    loadReviews();
+  }
+}
+
+async function loadReviews(){
+  const area = document.getElementById('list-area');
+  area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading reviews...</div>`;
+  try{
+    const resp = await fetch('/api/reviews');
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    const items = await resp.json();
+    STATE.reviews.lastItems = items || [];
+    const typeColor = {
+      projects:'#10b981',
+      sources:'#f59e0b',
+      wiki_cards:'#8b5cf6',
+      outputs:'#ec4899',
+      tasks:'#3b82f6',
+    };
+    const typeLabel = {
+      projects:'Projects',
+      sources:'Sources',
+      wiki_cards:'Wiki',
+      outputs:'Outputs',
+      tasks:'Tasks',
+    };
+    const rows = STATE.reviews.lastItems.map(r=>{
+      const c = typeColor[r.table] || '#6b7280';
+      const statusColor = STATUS_COLORS[r.status] || '#6b7280';
+      return `<tr>
+        <td><span class="status-badge" style="color:${c};border:1px solid ${c}40;background:${c}10">${typeLabel[r.table]||r.table}</span></td>
+        <td>${r.title||'(untitled)'}</td>
+        <td>${badgeHtml(r.status,statusColor)}</td>
+        <td>${timeAgo(r.updated_at)}</td>
+        <td><button class="pager-btn" onclick="approveReview(${r.id}, '${r.table}')">Approve</button></td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="5" style="padding:.8rem;color:var(--t3)">暂无待 Review 项</td></tr>`;
+    area.innerHTML = `
+      <table class="table">
+        <thead>
+          <tr><th>类型</th><th>标题</th><th>状态</th><th>更新时间</th><th>操作</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }catch(e){
+    area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function approveReview(id, table){
+  const map = {
+    projects:{endpoint:'projects', body:{review_needed:false}},
+    sources:{endpoint:'sources', body:{review_needed:false}},
+    wiki_cards:{endpoint:'wiki-cards', body:{needs_review:false}},
+    outputs:{endpoint:'outputs', body:{review_needed:false}},
+    tasks:{endpoint:'tasks', body:{review_needed:false}},
+  };
+  const cfg = map[table];
+  if(!cfg) return;
+  try{
+    const resp = await fetch(`/api/${cfg.endpoint}/${id}`,{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(cfg.body),
+    });
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    // remove from local list and re-render
+    STATE.reviews.lastItems = (STATE.reviews.lastItems||[]).filter(r=>r.id!==id);
+    loadReviews();
+  }catch(e){
+    alert('Approve 失败: '+e.message);
   }
 }
 
@@ -620,6 +725,13 @@ async function renderDetail(view,id){
         <div class="detail-header">
           <div class="detail-back" onclick="location.hash='outputs'">← 返回产出列表</div>
         </div>
+        <div class="section-card" style="margin-top:.2rem;margin-bottom:.6rem">
+          <div class="section-title" style="margin-bottom:.2rem">导出 / 预览</div>
+          <div class="section-body" style="white-space:normal">
+            <a href="/api/outputs/${id}/markdown" class="meta-link" style="margin-right:.8rem">📥 Download .md</a>
+            <a href="/api/outputs/${id}/html" target="_blank" class="meta-link">📄 View HTML</a>
+          </div>
+        </div>
         <div class="detail-title" style="margin-bottom:.4rem">${o.name||'(untitled)'}</div>
         <div style="margin-bottom:.6rem;display:flex;gap:.4rem;align-items:center">
           ${badgeHtml(o.status, sc)}
@@ -632,9 +744,12 @@ async function renderDetail(view,id){
           <div><div class="meta-item-label">Created</div><div class="meta-item-value">${formatDate(o.created_at)}</div></div>
           <div><div class="meta-item-label">Updated</div><div class="meta-item-value">${formatDate(o.updated_at)}</div></div>
         </div>
-        ${o.content?`<div class="section-card"><div class="section-title">内容</div><div class="section-body">${o.content}</div></div>`:''}
+        ${o.content?`<div class="section-card"><div class="section-title">内容</div><div id="output-content" class="section-body"></div></div>`:''}
         ${o.ai_notes?`<div class="section-card"><div class="section-title">AI Notes</div><div class="section-body">${o.ai_notes}</div></div>`:''}
       `;
+      if(o.content && window.marked){
+        document.getElementById('output-content').innerHTML = marked.parse(o.content);
+      }
     }catch(e){
       content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
     }

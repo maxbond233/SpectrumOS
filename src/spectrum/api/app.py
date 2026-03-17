@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from spectrum._version import __version__
 from spectrum.api import routes
 from spectrum.db.activity_log import ActivityLogger
 from spectrum.db.operations import DatabaseOps
@@ -24,7 +25,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(
         title="光谱 OS Agent API",
-        version="0.1.0",
+        version=__version__,
         description="Multi-agent knowledge pipeline control plane",
     )
 

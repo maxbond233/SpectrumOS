@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spectrum-os"
-version = "0.1.0"
+version = "0.3.0"
 description = "光谱 OS — SQLite-backed multi-agent knowledge pipeline"
 requires-python = ">=3.11"
 dependencies = [
@@ -20,6 +20,7 @@ dependencies = [
     "httpx>=0.27.0",
     "tavily-python>=0.5.0",
     "pyyaml>=6.0",
+    "markdown>=3.5",
 ]
 
 [project.optional-dependencies]

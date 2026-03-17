@@ -183,7 +183,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 
   <!-- Hero -->
   <div class="hero" style="animation:fadeUp .4s ease both">
-    <div class="hero-badge"><span>🔮</span> spectrum os v0.1</div>
+    <div class="hero-badge"><span>🔮</span> spectrum os <span id="version-badge">v...</span></div>
     <h1><span>光谱</span> OS</h1>
     <p>棱镜系统总控台 · Multi-Agent Knowledge Operating System</p>
     <div class="update-time" id="update-time"><span class="live-dot"></span>loading...</div>
@@ -482,6 +482,17 @@ async function loadData() {
       `<div class="error-box" style="grid-column:1/-1">连接失败: ${err.message}</div>`;
   }
 }
+
+// Fetch version for hero badge
+fetch('/api/health')
+  .then(r => r.ok ? r.json() : null)
+  .then(data => {
+    if(data && data.version){
+      const el = document.getElementById('version-badge');
+      if(el) el.textContent = `v${data.version}`;
+    }
+  })
+  .catch(()=>{});
 
 async function triggerAgent(key) {
   try {

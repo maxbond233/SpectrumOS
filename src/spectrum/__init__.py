@@ -1,3 +1,3 @@
 """光谱 OS — Multi-agent knowledge pipeline."""
 
-__version__ = "0.1.0"
+from spectrum._version import __version__ as __version__

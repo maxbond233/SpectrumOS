@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from spectrum._version import __version__
+
 
 # ── Requests ─────────────────────────────────────────────────────────────────
 
@@ -24,7 +26,7 @@ class CreateProjectRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.1.0"
+    version: str = __version__
     agents: list[str] = []
 
 
@@ -73,6 +75,37 @@ class CreateSourceRequest(BaseModel):
 class UpdateTaskRequest(BaseModel):
     status: str | None = None
     review_needed: bool | None = None
+
+
+class UpdateProjectRequest(BaseModel):
+    status: str | None = None
+    priority: str | None = None
+    review_needed: bool | None = None
+
+
+class UpdateSourceRequest(BaseModel):
+    status: str | None = None
+    priority: str | None = None
+    review_needed: bool | None = None
+
+
+class UpdateWikiCardRequest(BaseModel):
+    maturity: str | None = None
+    needs_review: bool | None = None
+
+
+class UpdateOutputRequest(BaseModel):
+    status: str | None = None
+    review_needed: bool | None = None
+
+
+class ReviewItemResponse(BaseModel):
+    id: int
+    table: str
+    title: str
+    status: str
+    created_at: str
+    updated_at: str
 
 
 class TableStats(BaseModel):
