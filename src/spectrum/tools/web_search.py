@@ -151,15 +151,21 @@ class WebSearchTool:
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call from the LLM."""
-        if tool_name == "web_search":
-            results = await self.search(
-                arguments["query"],
-                arguments.get("max_results", 5),
-            )
-            return "\n\n".join(
-                f"[{r.title}]({r.url})\n{r.snippet}" for r in results
-            )
-        elif tool_name == "fetch_page":
-            page = await self.fetch_page(arguments["url"])
-            return f"# {page.title}\n\n{page.text}"
-        return f"Unknown tool: {tool_name}"
+        try:
+            if tool_name == "web_search":
+                results = await self.search(
+                    arguments["query"],
+                    arguments.get("max_results", 5),
+                )
+                if not results:
+                    return "搜索无结果，请尝试其他关键词。"
+                return "\n\n".join(
+                    f"[{r.title}]({r.url})\n{r.snippet}" for r in results
+                )
+            elif tool_name == "fetch_page":
+                page = await self.fetch_page(arguments["url"])
+                return f"# {page.title}\n\n{page.text}"
+            return f"Unknown tool: {tool_name}"
+        except Exception as e:
+            logger.warning("Tool %s execution failed: %s", tool_name, e)
+            return f"工具调用失败: {e}"

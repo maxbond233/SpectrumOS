@@ -139,6 +139,7 @@ class OpenAICompatProvider(LLMProvider):
         oai_messages = [{"role": "system", "content": system}]
         oai_messages.extend(messages)
         final_response = LLMResponse()
+        collected_tool_results: list[str] = []
 
         oai_tools = None
         if tools:
@@ -151,7 +152,7 @@ class OpenAICompatProvider(LLMProvider):
                 },
             } for t in tools]
 
-        for _ in range(max_rounds):
+        for round_num in range(max_rounds):
             kwargs: dict[str, Any] = {
                 "model": self._model,
                 "max_tokens": max_tokens,
@@ -173,21 +174,42 @@ class OpenAICompatProvider(LLMProvider):
             if not choice.message.tool_calls or tool_executor is None:
                 final_response.content = choice.message.content or ""
                 final_response.stop_reason = choice.finish_reason or ""
+                logger.debug(
+                    "Tool loop finished after %d rounds, content length: %d",
+                    round_num + 1, len(final_response.content),
+                )
                 return final_response
 
             # Append assistant message with tool calls
             oai_messages.append(choice.message.model_dump())
 
-            # Execute tools
+            # Execute tools and collect results
             for tc in choice.message.tool_calls:
                 args = json.loads(tc.function.arguments)
+                logger.debug("Calling tool %s with args: %s", tc.function.name, args)
                 result = await tool_executor(tc.function.name, args)
+                collected_tool_results.append(result)
                 oai_messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": str(result),
                 })
 
+        # max_rounds exhausted — ask model for final summary with collected context
+        logger.warning("Tool loop hit max_rounds (%d), requesting final summary", max_rounds)
+        oai_messages.append({
+            "role": "user",
+            "content": "你已经完成了所有搜索。请根据以上工具返回的结果，按照要求的 JSON 格式输出最终结果。不要再调用任何工具。",
+        })
+        kwargs = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": oai_messages,
+        }
+        resp = await self._client.chat.completions.create(**kwargs)
+        choice = resp.choices[0]
+        final_response.content = choice.message.content or ""
         final_response.stop_reason = "max_rounds"
         return final_response
 
