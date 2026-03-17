@@ -96,7 +96,22 @@ class FocusAgent(AgentBase):
         try:
             raw = json.loads(text)
         except json.JSONDecodeError:
-            self.logger.warning("Failed to parse source list from LLM response")
+            self.logger.warning(f"Failed to parse source list from LLM response: {content[:200]}")
+            # 如果解析失败，尝试从内容中提取基本信息创建简单 source
+            if len(content) > 50:
+                self.logger.info("Creating fallback source from LLM response")
+                return [{
+                    "title": f"采集素材 - {project_ref}",
+                    "source_type": "web",
+                    "status": "Collected",
+                    "url": "",
+                    "authors": "",
+                    "extracted_summary": content[:1000],
+                    "key_questions": "",
+                    "why_it_matters": "",
+                    "project_ref": project_ref,
+                    "assigned_agent": "focus",
+                }]
             return []
 
         sources = []

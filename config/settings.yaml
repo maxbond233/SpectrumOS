@@ -15,9 +15,9 @@ llm:
   agents:
     prism: {}
     focus:
-      model: "deepseek-v3.2"
-      api_key_env: "DEEPSEEK_API_KEY"
-      base_url_env: "DEEPSEEK_BASE_URL"
+      model: "claude-sonnet-4-5-20250929"
+      api_key_env: "CLAUDE_API_KEY"
+      base_url_env: "CLAUDE_BASE_URL"
     dispersion: {}
     diffraction: {}
 
