@@ -58,3 +58,43 @@ class StatsResponse(BaseModel):
     wiki_cards: int
     outputs: int
     logs: int
+
+
+# ── Dashboard Schemas ───────────────────────────────────────────────────────
+
+class CreateSourceRequest(BaseModel):
+    title: str
+    url: str = ""
+    source_type: str = ""
+    domain: str = ""
+    project_ref: int | None = None
+
+
+class UpdateTaskRequest(BaseModel):
+    status: str | None = None
+    review_needed: bool | None = None
+
+
+class TableStats(BaseModel):
+    total: int = 0
+    primary: dict[str, int] = {}    # main grouping (status/maturity/action)
+    secondary: dict[str, dict[str, int]] = {}  # sub-groupings
+    review_needed: int = 0
+    recent: list[dict] = []
+
+
+class AgentInfo(BaseModel):
+    name: str
+    key: str
+    emoji: str
+    role: str
+    role_en: str
+    color: str
+    active: bool = False
+    task_count: int = 0
+
+
+class DashboardStatsResponse(BaseModel):
+    timestamp: str
+    agents: list[AgentInfo]
+    databases: dict[str, TableStats]

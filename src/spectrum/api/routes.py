@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
+
 from fastapi import APIRouter, HTTPException
 
 from spectrum.api.schemas import (
+    AgentInfo,
     CreateProjectRequest,
+    CreateSourceRequest,
+    DashboardStatsResponse,
     HealthResponse,
     ProjectResponse,
     StatsResponse,
+    TableStats,
     TaskResponse,
     TriggerAgentRequest,
     TriggerResponse,
+    UpdateTaskRequest,
 )
 from spectrum.db.activity_log import ActivityLogger
 from spectrum.db.operations import DatabaseOps
@@ -139,3 +146,182 @@ async def stats():
         outputs=len(outputs),
         logs=len(logs),
     )
+
+
+# ── Agent Definitions ───────────────────────────────────────────────────────
+
+AGENT_DEFS = [
+    {"name": "棱镜", "key": "prism",       "emoji": "🔮", "role": "总控", "role_en": "Orchestrator", "color": "#10b981"},
+    {"name": "聚光", "key": "focus",        "emoji": "💠", "role": "采集", "role_en": "Collector",    "color": "#f59e0b"},
+    {"name": "色散", "key": "dispersion",   "emoji": "🌈", "role": "分析", "role_en": "Analyst",      "color": "#8b5cf6"},
+    {"name": "衍射", "key": "diffraction",  "emoji": "🌊", "role": "沉淀", "role_en": "Curator",      "color": "#06b6d4"},
+]
+
+
+# ── Dashboard Stats ─────────────────────────────────────────────────────────
+
+def _group_by(items, attr: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        val = getattr(item, attr, "") or ""
+        if val:
+            counts[val] = counts.get(val, 0) + 1
+    return counts
+
+
+def _recent_items(items, fields: list[str], limit: int = 5) -> list[dict]:
+    recent = []
+    for item in items[:limit]:
+        entry: dict = {"id": item.id}
+        for f in fields:
+            entry[f] = getattr(item, f, "")
+        # Use 'title' key for display — pick the best name field
+        if "title" not in entry:
+            entry["title"] = getattr(item, "name", "") or getattr(item, "concept", "") or getattr(item, "title", "")
+        recent.append(entry)
+    return recent
+
+
+@router.get("/dashboard/stats", response_model=DashboardStatsResponse)
+async def dashboard_stats():
+    projects = await _db.list_projects()
+    sources = await _db.list_sources()
+    wiki_cards = await _db.list_wiki_cards()
+    outputs = await _db.list_outputs()
+    tasks = await _db.list_tasks()
+    logs = await _db.list_logs()
+
+    # Agent task counts
+    agent_task_counts: dict[str, int] = {}
+    for t in tasks:
+        if t.assigned_agent:
+            agent_task_counts[t.assigned_agent] = agent_task_counts.get(t.assigned_agent, 0) + 1
+
+    active_agents = set()
+    for t in tasks:
+        if t.status == "Doing" and t.assigned_agent:
+            active_agents.add(t.assigned_agent)
+
+    agent_infos = []
+    for a in AGENT_DEFS:
+        agent_infos.append(AgentInfo(
+            **a,
+            active=a["name"] in active_agents,
+            task_count=agent_task_counts.get(a["name"], 0),
+        ))
+
+    databases: dict[str, TableStats] = {}
+
+    # Research Projects
+    databases["projects"] = TableStats(
+        total=len(projects),
+        primary=_group_by(projects, "status"),
+        secondary={"domain": _group_by(projects, "domain"), "priority": _group_by(projects, "priority")},
+        review_needed=sum(1 for p in projects if p.review_needed),
+        recent=_recent_items(projects, ["name", "status", "domain", "priority"]),
+    )
+
+    # Sources
+    databases["sources"] = TableStats(
+        total=len(sources),
+        primary=_group_by(sources, "status"),
+        secondary={"domain": _group_by(sources, "domain"), "source_type": _group_by(sources, "source_type")},
+        review_needed=sum(1 for s in sources if s.review_needed),
+        recent=_recent_items(sources, ["title", "status", "domain", "source_type"]),
+    )
+
+    # Wiki Cards
+    databases["wiki"] = TableStats(
+        total=len(wiki_cards),
+        primary=_group_by(wiki_cards, "maturity"),
+        secondary={"domain": _group_by(wiki_cards, "domain"), "type": _group_by(wiki_cards, "type")},
+        review_needed=sum(1 for w in wiki_cards if w.needs_review),
+        recent=_recent_items(wiki_cards, ["concept", "maturity", "domain", "type"]),
+    )
+
+    # Outputs
+    databases["outputs"] = TableStats(
+        total=len(outputs),
+        primary=_group_by(outputs, "status"),
+        secondary={"type": _group_by(outputs, "type")},
+        review_needed=sum(1 for o in outputs if o.review_needed),
+        recent=_recent_items(outputs, ["name", "status", "type"]),
+    )
+
+    # Tasks
+    databases["tasks"] = TableStats(
+        total=len(tasks),
+        primary=_group_by(tasks, "status"),
+        secondary={"type": _group_by(tasks, "type"), "agent": _group_by(tasks, "assigned_agent")},
+        review_needed=sum(1 for t in tasks if t.review_needed),
+        recent=_recent_items(tasks, ["name", "status", "type", "assigned_agent"]),
+    )
+
+    # Activity Log
+    databases["activity_log"] = TableStats(
+        total=len(logs),
+        primary=_group_by(logs, "action_type"),
+        secondary={"actor": _group_by(logs, "actor"), "target_db": _group_by(logs, "target_db")},
+        review_needed=sum(1 for l in logs if l.needs_review),
+        recent=_recent_items(logs, ["title", "action_type", "actor", "target_db"]),
+    )
+
+    now = datetime.now(timezone(timedelta(hours=8)))
+    return DashboardStatsResponse(
+        timestamp=now.isoformat(),
+        agents=agent_infos,
+        databases=databases,
+    )
+
+
+# ── Create Source (intervention) ────────────────────────────────────────────
+
+@router.post("/sources", status_code=201)
+async def create_source(req: CreateSourceRequest):
+    source = await _db.create_source(
+        title=req.title,
+        url=req.url,
+        source_type=req.source_type,
+        domain=req.domain,
+        project_ref=req.project_ref,
+        status="Collected",
+    )
+    await _activity_logger.log(
+        actor="human",
+        action_type="Create",
+        target_db="Sources",
+        description=f"手动添加素材: {req.title}",
+        target_record=str(source.id),
+    )
+    return {"id": source.id, "title": source.title, "status": source.status}
+
+
+# ── Update Task (intervention) ──────────────────────────────────────────────
+
+@router.patch("/tasks/{task_id}")
+async def update_task(task_id: int, req: UpdateTaskRequest):
+    task = await _db.get_task(task_id)
+    if not task:
+        raise HTTPException(404, f"Task {task_id} not found")
+
+    fields: dict = {}
+    if req.status is not None:
+        fields["status"] = req.status
+    if req.review_needed is not None:
+        fields["review_needed"] = req.review_needed
+
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+
+    updated = await _db.update_task(task_id, **fields)
+    await _activity_logger.log(
+        actor="human",
+        action_type="Update",
+        target_db="Agent Tasks",
+        description=f"手动更新任务 #{task_id}",
+        target_record=str(task_id),
+        before=task.status,
+        after=fields.get("status", task.status),
+        needs_review=True,
+    )
+    return {"id": updated.id, "name": updated.name, "status": updated.status, "review_needed": updated.review_needed}

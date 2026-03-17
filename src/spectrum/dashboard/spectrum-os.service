@@ -1,0 +1,15 @@
+[Unit]
+Description=Spectrum OS (光谱 OS)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/spectrum-os
+EnvironmentFile=/opt/spectrum-os/.env
+ExecStart=/usr/bin/python3 -m spectrum.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

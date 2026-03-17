@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光谱 OS · 棱镜系统总控台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#06080d;--bg2:rgba(255,255,255,.03);--bg3:rgba(255,255,255,.06);
+  --bd:rgba(255,255,255,.06);--bd2:rgba(255,255,255,.12);
+  --t1:rgba(255,255,255,.92);--t2:rgba(255,255,255,.5);--t3:rgba(255,255,255,.28);
+  --purple:#8b5cf6;--blue:#3b82f6;--cyan:#06b6d4;--green:#10b981;
+  --amber:#f59e0b;--red:#ef4444;--pink:#ec4899;
+  --r:12px;--r-sm:8px;--r-lg:16px;
+  --sans:'Noto Sans SC',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{font-size:15px}
+body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden}
+
+.ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.ambient::before{content:'';position:absolute;width:600px;height:600px;top:-200px;left:-100px;background:radial-gradient(circle,rgba(139,92,246,.08) 0%,transparent 70%);animation:drift 20s ease-in-out infinite}
+.ambient::after{content:'';position:absolute;width:500px;height:500px;bottom:-150px;right:-100px;background:radial-gradient(circle,rgba(6,182,212,.06) 0%,transparent 70%);animation:drift 25s ease-in-out infinite reverse}
+@keyframes drift{0%,100%{transform:translate(0,0)}33%{transform:translate(40px,30px)}66%{transform:translate(-20px,50px)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.container{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:2rem 1.5rem 4rem}
+
+/* Hero */
+.hero{text-align:center;padding:3rem 0 2.5rem}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--purple);background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.15);border-radius:20px;padding:5px 14px;margin-bottom:1.2rem;font-family:var(--mono)}
+.hero h1{font-size:2.4rem;font-weight:300;letter-spacing:-.02em;background:linear-gradient(135deg,#fff 0%,rgba(255,255,255,.6) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:.5rem}
+.hero h1 span{font-weight:600}
+.hero p{font-size:.88rem;color:var(--t2);font-weight:300}
+.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:4px;animation:pulse 2s ease-in-out infinite}
+.update-time{font-size:.65rem;color:var(--t3);font-family:var(--mono);margin-top:.4rem}
+
+/* Nav links */
+.notion-links{display:flex;justify-content:center;gap:.6rem;margin-top:1.2rem;flex-wrap:wrap}
+.notion-link{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;font-size:.7rem;font-family:var(--mono);color:var(--t2);background:var(--bg2);border:1px solid var(--bd);border-radius:20px;text-decoration:none;transition:all .2s;letter-spacing:.3px}
+.notion-link:hover{color:var(--t1);border-color:var(--bd2);background:var(--bg3)}
+.notion-link svg{width:13px;height:13px;opacity:.6}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--bd);border-radius:var(--r-lg);overflow:hidden;margin-bottom:2.5rem}
+.stat{background:var(--bg2);padding:1.2rem 1.4rem;transition:background .2s}
+.stat:hover{background:var(--bg3)}
+.stat-label{font-size:.6rem;letter-spacing:1.2px;text-transform:uppercase;color:var(--t3);font-family:var(--mono);margin-bottom:.4rem}
+.stat-value{font-size:1.6rem;font-weight:600;font-family:var(--mono);transition:all .3s}
+.stat-sub{font-size:.7rem;color:var(--t2);margin-top:.2rem}
+.stat-bar{display:flex;gap:2px;margin-top:.5rem;height:4px;border-radius:2px;overflow:hidden}
+.stat-bar-seg{height:100%;border-radius:2px;transition:width .5s ease}
+
+/* Section */
+.section{margin-bottom:2.5rem;animation:fadeUp .5s ease both}
+.section-header{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;padding-bottom:.6rem;border-bottom:1px solid var(--bd)}
+.section-header h2{font-size:.95rem;font-weight:500;letter-spacing:.3px}
+.section-header .tag{font-size:.6rem;letter-spacing:1px;text-transform:uppercase;font-family:var(--mono);color:var(--t3);margin-left:auto}
+.section-header .refresh-btn{background:none;border:1px solid var(--bd);border-radius:6px;padding:3px 8px;font-size:.6rem;color:var(--t3);cursor:pointer;font-family:var(--mono);transition:all .2s}
+.section-header .refresh-btn:hover{color:var(--t1);border-color:var(--bd2)}
+
+/* Agent grid */
+.agent-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.agent-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:1.2rem .8rem;text-align:center;cursor:pointer;transition:all .25s;position:relative;overflow:hidden}
+.agent-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--agent-color,var(--bd));opacity:0;transition:opacity .2s}
+.agent-card:hover{background:var(--bg3);border-color:var(--bd2);transform:translateY(-2px)}
+.agent-card:hover::before{opacity:1}
+.agent-card.active{border-color:rgba(16,185,129,.3)}
+.agent-card.active::before{opacity:1;background:var(--green)}
+.agent-emoji{font-size:1.6rem;margin-bottom:.5rem;display:block}
+.agent-name{font-size:.82rem;font-weight:500;display:flex;align-items:center;justify-content:center;gap:5px}
+.agent-role{font-size:.62rem;color:var(--t2);font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;margin-top:.3rem}
+.agent-tasks{font-size:.6rem;color:var(--t3);font-family:var(--mono);margin-top:.4rem}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.dot-on{background:var(--green);box-shadow:0 0 8px rgba(16,185,129,.5)}
+.dot-off{background:var(--t3)}
+
+/* Database cards */
+.db-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.db-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:1.2rem 1.4rem;cursor:pointer;transition:all .25s;text-decoration:none;color:inherit;display:block}
+.db-card:hover{background:var(--bg3);border-color:var(--bd2);transform:translateY(-1px)}
+.db-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem}
+.db-icon{font-size:1.1rem}
+.db-name{font-size:.88rem;font-weight:500}
+.db-count{margin-left:auto;font-size:.72rem;font-family:var(--mono);font-weight:500}
+.db-breakdown{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:.6rem}
+.db-chip{font-size:.62rem;padding:3px 8px;border-radius:10px;font-family:var(--mono);letter-spacing:.3px;border:1px solid}
+.db-bar{display:flex;gap:2px;height:6px;border-radius:3px;overflow:hidden;margin-bottom:.6rem}
+.db-bar-seg{height:100%;border-radius:3px;transition:width .5s ease;min-width:3px}
+.db-recent{border-top:1px solid rgba(255,255,255,.04);padding-top:.6rem}
+.db-recent-title{font-size:.6rem;color:var(--t3);font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:.4rem}
+.db-recent-item{display:flex;align-items:center;gap:.4rem;padding:3px 0;font-size:.72rem;color:var(--t2)}
+.db-recent-item a{color:var(--t2);text-decoration:none;transition:color .15s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-recent-item a:hover{color:var(--t1)}
+.db-recent-item .badge{font-size:.55rem;padding:1px 6px;border-radius:8px;font-family:var(--mono);flex-shrink:0}
+
+/* Flow */
+.flow-container{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:1.4rem}
+.flow-row{display:flex;align-items:center;gap:.5rem;padding:.5rem 0;font-size:.78rem;color:var(--t2)}
+.flow-row+.flow-row{border-top:1px solid rgba(255,255,255,.03)}
+.flow-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.flow-name{font-weight:500;color:var(--t1);min-width:110px}
+.flow-line{flex:1;height:1px;background:linear-gradient(90deg,var(--bd) 0%,transparent 100%)}
+.flow-desc{font-size:.68rem;font-family:var(--mono);color:var(--t3)}
+.flow-count{font-size:.68rem;font-family:var(--mono);font-weight:500;min-width:30px;text-align:right}
+.flow-indent{padding-left:1.5rem}
+.flow-arrow{color:var(--t3);font-size:.7rem;margin-right:.3rem}
+
+/* Rules */
+.rules-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.rule-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:1rem 1.2rem}
+.rule-title{font-size:.78rem;font-weight:500;margin-bottom:.4rem}
+.rule-desc{font-size:.68rem;color:var(--t2);line-height:1.6}
+
+/* Loading */
+.loading{display:flex;align-items:center;justify-content:center;padding:3rem;color:var(--t3);font-size:.8rem;gap:.5rem}
+.spinner{width:16px;height:16px;border:2px solid var(--bd);border-top-color:var(--purple);border-radius:50%;animation:spin .8s linear infinite}
+
+/* Footer */
+.footer{text-align:center;padding:2rem 0 0;border-top:1px solid var(--bd);margin-top:1rem}
+.footer p{font-size:.65rem;color:var(--t3);font-family:var(--mono);letter-spacing:.5px}
+.footer a{color:var(--purple);text-decoration:none}
+
+/* Agent trigger button */
+.agent-trigger{margin-top:.5rem;padding:3px 10px;font-size:.6rem;font-family:var(--mono);background:none;border:1px solid var(--bd);border-radius:6px;color:var(--t2);cursor:pointer;transition:all .2s}
+.agent-trigger:hover{color:var(--t1);border-color:var(--bd2);background:var(--bg3)}
+
+/* Task status toggle in recent items */
+.task-status-btn{padding:1px 6px;font-size:.55rem;border-radius:8px;font-family:var(--mono);cursor:pointer;border:1px solid;background:none;transition:all .2s}
+.task-status-btn:hover{opacity:.8}
+
+/* Intervention forms */
+.intervention{margin-bottom:2.5rem}
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.form-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:1.2rem 1.4rem}
+.form-card h3{font-size:.82rem;font-weight:500;margin-bottom:.8rem}
+.form-row{margin-bottom:.6rem}
+.form-row label{display:block;font-size:.6rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.2rem}
+.form-row input,.form-row select,.form-row textarea{width:100%;padding:6px 10px;font-size:.75rem;font-family:var(--sans);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-sm);color:var(--t1);outline:none;transition:border-color .2s}
+.form-row input:focus,.form-row select:focus,.form-row textarea:focus{border-color:var(--purple)}
+.form-row select{appearance:none}
+.form-row textarea{resize:vertical;min-height:50px}
+.form-submit{padding:6px 16px;font-size:.72rem;font-family:var(--mono);background:var(--purple);color:#fff;border:none;border-radius:var(--r-sm);cursor:pointer;transition:opacity .2s}
+.form-submit:hover{opacity:.85}
+.form-submit:disabled{opacity:.4;cursor:not-allowed}
+
+/* Toast */
+.toast-container{position:fixed;top:1rem;right:1rem;z-index:1000;display:flex;flex-direction:column;gap:.5rem}
+.toast{padding:.6rem 1rem;border-radius:var(--r-sm);font-size:.75rem;font-family:var(--sans);animation:fadeUp .3s ease;max-width:320px}
+.toast-success{background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.3);color:var(--green)}
+.toast-error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:var(--red)}
+
+/* Error */
+.error-box{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:var(--r);padding:1rem;text-align:center;color:var(--red);font-size:.8rem}
+
+/* Responsive */
+@media(max-width:768px){
+  .stats{grid-template-columns:repeat(3,1fr)}
+  .agent-grid{grid-template-columns:repeat(2,1fr)}
+  .db-grid{grid-template-columns:repeat(2,1fr)}
+  .rules-grid{grid-template-columns:1fr}
+  .hero h1{font-size:1.8rem}
+  .container{padding:1rem}
+}
+@media(max-width:480px){
+  .agent-grid{grid-template-columns:repeat(2,1fr)}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .db-grid{grid-template-columns:1fr}
+}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
+</style>
+</head>
+<body>
+<div class="toast-container" id="toast-container"></div>
+<div class="ambient"></div>
+<div class="container">
+
+  <!-- Hero -->
+  <div class="hero" style="animation:fadeUp .4s ease both">
+    <div class="hero-badge"><span>🔮</span> spectrum os v0.1</div>
+    <h1><span>光谱</span> OS</h1>
+    <p>棱镜系统总控台 · Multi-Agent Knowledge Operating System</p>
+    <div class="update-time" id="update-time"><span class="live-dot"></span>loading...</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats" id="stats-row" style="animation:fadeUp .4s ease .05s both">
+    <div class="stat"><div class="stat-label">Projects</div><div class="stat-value" id="stat-projects" style="color:var(--green)">-</div><div class="stat-sub" id="stat-projects-sub">loading...</div><div class="stat-bar" id="stat-projects-bar"></div></div>
+    <div class="stat"><div class="stat-label">Sources</div><div class="stat-value" id="stat-sources" style="color:var(--amber)">-</div><div class="stat-sub" id="stat-sources-sub">loading...</div><div class="stat-bar" id="stat-sources-bar"></div></div>
+    <div class="stat"><div class="stat-label">Wiki</div><div class="stat-value" id="stat-wiki" style="color:var(--purple)">-</div><div class="stat-sub" id="stat-wiki-sub">loading...</div><div class="stat-bar" id="stat-wiki-bar"></div></div>
+    <div class="stat"><div class="stat-label">Outputs</div><div class="stat-value" id="stat-outputs" style="color:var(--pink)">-</div><div class="stat-sub" id="stat-outputs-sub">loading...</div><div class="stat-bar" id="stat-outputs-bar"></div></div>
+    <div class="stat"><div class="stat-label">Tasks</div><div class="stat-value" id="stat-tasks" style="color:var(--blue)">-</div><div class="stat-sub" id="stat-tasks-sub">loading...</div><div class="stat-bar" id="stat-tasks-bar"></div></div>
+    <div class="stat"><div class="stat-label">Activity</div><div class="stat-value" id="stat-log" style="color:var(--cyan)">-</div><div class="stat-sub" id="stat-log-sub">loading...</div><div class="stat-bar" id="stat-log-bar"></div></div>
+  </div>
+
+  <!-- Agents -->
+  <div class="section" style="animation-delay:.1s">
+    <div class="section-header">
+      <h2>🤖 代理矩阵</h2>
+      <span class="tag">Light Path</span>
+    </div>
+    <div class="agent-grid" id="agent-grid"></div>
+  </div>
+
+  <!-- Databases -->
+  <div class="section" style="animation-delay:.15s">
+    <div class="section-header">
+      <h2>🗄️ 数据库</h2>
+      <button class="refresh-btn" onclick="loadData()">↻ refresh</button>
+    </div>
+    <div class="db-grid" id="db-grid">
+      <div class="loading"><div class="spinner"></div>Loading...</div>
+    </div>
+  </div>
+
+  <!-- Intervention -->
+  <div class="section intervention" style="animation-delay:.18s">
+    <div class="section-header">
+      <h2>🎛️ 干预</h2>
+      <span class="tag">Intervention</span>
+    </div>
+    <div class="form-grid">
+      <!-- 添加素材 -->
+      <div class="form-card">
+        <h3>📚 添加素材</h3>
+        <div class="form-row"><label>标题 *</label><input id="src-title" placeholder="文章/论文标题"></div>
+        <div class="form-row"><label>URL</label><input id="src-url" placeholder="https://..."></div>
+        <div class="form-row"><label>类型</label><select id="src-type"><option value="">--</option><option>论文</option><option>文章</option><option>视频</option><option>书籍</option><option>工具</option></select></div>
+        <div class="form-row"><label>领域</label><select id="src-domain"><option value="">--</option><option>生物信息</option><option>AI</option><option>编程</option><option>数学</option><option>英语</option><option>科研方法</option></select></div>
+        <div class="form-row"><label>关联课题</label><select id="src-project"></select></div>
+        <button class="form-submit" onclick="submitSource()">提交素材</button>
+      </div>
+      <!-- 创建课题 -->
+      <div class="form-card">
+        <h3>🔬 创建课题</h3>
+        <div class="form-row"><label>名称 *</label><input id="proj-name" placeholder="课题名称"></div>
+        <div class="form-row"><label>领域</label><select id="proj-domain"><option value="">--</option><option>生物信息</option><option>AI</option><option>编程</option><option>数学</option><option>英语</option><option>科研方法</option></select></div>
+        <div class="form-row"><label>研究问题</label><textarea id="proj-questions" placeholder="核心问题，每行一个"></textarea></div>
+        <div class="form-row"><label>产出类型</label><select id="proj-output"><option>综述</option><option>教程</option><option>笔记</option><option>报告</option><option>论文草稿</option></select></div>
+        <div class="form-row"><label>优先级</label><select id="proj-priority"><option>P2</option><option>P1</option><option>P3</option></select></div>
+        <button class="form-submit" onclick="submitProject()">创建课题</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Flow -->
+  <div class="section" style="animation-delay:.2s">
+    <div class="section-header">
+      <h2>🔄 数据流</h2>
+      <span class="tag">Pipeline</span>
+    </div>
+    <div class="flow-container" id="flow-container"></div>
+  </div>
+
+  <!-- Rules -->
+  <div class="section" style="animation-delay:.25s">
+    <div class="section-header">
+      <h2>🏗️ 系统规则</h2>
+      <span class="tag">Iron Rules</span>
+    </div>
+    <div class="rules-grid">
+      <div class="rule-card"><div class="rule-title" style="color:var(--red)">🚫 AI 不直接删除</div><div class="rule-desc">只能新建、补充、标记、建议归档。删除必须人工确认。</div></div>
+      <div class="rule-card"><div class="rule-title" style="color:var(--amber)">🔒 字段写入隔离</div><div class="rule-desc">AI 字段与人工字段分离，一个字段只有一个主要写入者。</div></div>
+      <div class="rule-card"><div class="rule-title" style="color:var(--purple)">👁️ 高风险需审核</div><div class="rule-desc">状态变更、优先级调整、条目合并等操作需 Review Needed。</div></div>
+      <div class="rule-card"><div class="rule-title" style="color:var(--green)">📋 全程留痕</div><div class="rule-desc">所有 AI 操作写入 Activity Log，记录 before/after 与置信度。</div></div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <p>光谱 OS · Spectrum Operating System · Built with 🔮 棱镜</p>
+  </div>
+
+</div>
+
+<script>
+const STATUS_COLORS = {
+  'Inbox':'#6b7280','Todo':'#3b82f6','Doing':'#f59e0b','Waiting':'#8b5cf6',
+  'Done':'#10b981','Archived':'#374151',
+  'Collected':'#6b7280','To Read':'#3b82f6','Reading':'#f59e0b','Processed':'#10b981',
+  'Seed':'#f59e0b','Growing':'#3b82f6','Stable':'#10b981',
+  'Create':'#10b981','Update':'#3b82f6','Summarize':'#8b5cf6','Classify':'#f59e0b',
+  'Link':'#06b6d4','Review':'#ec4899','Archive':'#6b7280','Other':'#374151',
+  'P1':'#ef4444','P2':'#f59e0b','P3':'#6b7280',
+  'High':'#ef4444','Medium':'#f59e0b','Low':'#6b7280',
+};
+const DOMAIN_COLORS = {
+  '生物信息':'#10b981','AI':'#3b82f6','编程':'#f59e0b','数学':'#8b5cf6',
+  '英语':'#ec4899','科研方法':'#ef4444','其他':'#6b7280',
+};
+
+function makeBar(counts, total, colorMap) {
+  if (!total) return '';
+  return Object.entries(counts).map(([k, v]) => {
+    const pct = Math.max((v / total * 100), 2);
+    const c = colorMap[k] || '#374151';
+    return `<div class="db-bar-seg" style="width:${pct}%;background:${c}" title="${k}: ${v}"></div>`;
+  }).join('');
+}
+
+function makeChips(counts, colorMap) {
+  return Object.entries(counts).map(([k, v]) => {
+    const c = colorMap[k] || '#6b7280';
+    return `<span class="db-chip" style="color:${c};border-color:${c}30;background:${c}10">${k} ${v}</span>`;
+  }).join('');
+}
+
+function makeRecent(items) {
+  if (!items || !items.length) return '';
+  return `<div class="db-recent"><div class="db-recent-title">Recent</div>${
+    items.slice(0, 3).map(item => {
+      const title = item.title || '(untitled)';
+      const status = item.status || item.action_type || item.maturity || '';
+      const sc = STATUS_COLORS[status] || '#6b7280';
+      return `<div class="db-recent-item">
+        ${status ? `<span class="badge" style="color:${sc};background:${sc}15">${status}</span>` : ''}
+        <span title="${title}">${title}</span>
+      </div>`;
+    }).join('')
+  }</div>`;
+}
+
+function renderStats(data) {
+  const db = data.databases;
+
+  function summaryFromPrimary(primary, review) {
+    const entries = Object.entries(primary || {}).sort((a,b) => b[1]-a[1]).slice(0,3);
+    const parts = entries.map(([k,v]) => `${k} ${v}`);
+    if (review !== undefined) parts.push(`${review} review`);
+    return parts.join(' · ');
+  }
+
+  const projects = db.projects || {};
+  document.getElementById('stat-projects').textContent = projects.total || 0;
+  document.getElementById('stat-projects-sub').textContent = summaryFromPrimary(projects.primary, projects.review_needed);
+  document.getElementById('stat-projects-bar').innerHTML = makeBar(projects.primary||{}, projects.total, STATUS_COLORS);
+
+  const sources = db.sources || {};
+  document.getElementById('stat-sources').textContent = sources.total || 0;
+  document.getElementById('stat-sources-sub').textContent = summaryFromPrimary(sources.primary, sources.review_needed);
+  document.getElementById('stat-sources-bar').innerHTML = makeBar(sources.primary||{}, sources.total, STATUS_COLORS);
+
+  const wiki = db.wiki || {};
+  document.getElementById('stat-wiki').textContent = wiki.total || 0;
+  document.getElementById('stat-wiki-sub').textContent = summaryFromPrimary(wiki.primary, wiki.review_needed);
+  document.getElementById('stat-wiki-bar').innerHTML = makeBar(wiki.primary||{}, wiki.total, STATUS_COLORS);
+
+  const outputs = db.outputs || {};
+  document.getElementById('stat-outputs').textContent = outputs.total || 0;
+  document.getElementById('stat-outputs-sub').textContent = summaryFromPrimary(outputs.primary, outputs.review_needed);
+  document.getElementById('stat-outputs-bar').innerHTML = makeBar(outputs.primary||{}, outputs.total, STATUS_COLORS);
+
+  const tasks = db.tasks || {};
+  document.getElementById('stat-tasks').textContent = tasks.total || 0;
+  document.getElementById('stat-tasks-sub').textContent = summaryFromPrimary(tasks.primary, tasks.review_needed);
+  document.getElementById('stat-tasks-bar').innerHTML = makeBar(tasks.primary||{}, tasks.total, STATUS_COLORS);
+
+  const log = db.activity_log || {};
+  document.getElementById('stat-log').textContent = log.total || 0;
+  document.getElementById('stat-log-sub').textContent = summaryFromPrimary(log.primary, log.review_needed);
+  document.getElementById('stat-log-bar').innerHTML = makeBar(log.primary||{}, log.total, STATUS_COLORS);
+}
+
+function renderAgents(data) {
+  const agents = data.agents || [];
+  const grid = document.getElementById('agent-grid');
+  grid.innerHTML = agents.map(a => {
+    const taskCount = a.task_count || 0;
+    return `<div class="agent-card ${a.active?'active':''}" style="--agent-color:${a.color}">
+      <span class="agent-emoji">${a.emoji}</span>
+      <div class="agent-name"><span class="dot ${a.active?'dot-on':'dot-off'}"></span>${a.name}</div>
+      <div class="agent-role">${a.role} · ${a.role_en}</div>
+      ${taskCount ? `<div class="agent-tasks">${taskCount} tasks</div>` : `<div class="agent-tasks" style="opacity:.3">idle</div>`}
+      <button class="agent-trigger" onclick="triggerAgent('${a.key}')">▶ Trigger</button>
+    </div>`;
+  }).join('');
+}
+
+function renderDatabases(data) {
+  const db = data.databases;
+  const grid = document.getElementById('db-grid');
+
+  grid.innerHTML = `
+    <div class="db-card">
+      <div class="db-head"><span class="db-icon">🔬</span><span class="db-name">Research Projects</span><span class="db-count" style="color:var(--green)">${db.projects.total}</span></div>
+      <div class="db-bar">${makeBar(db.projects.primary||{}, db.projects.total, STATUS_COLORS)}</div>
+      <div class="db-breakdown">${makeChips(db.projects.secondary.domain||{}, DOMAIN_COLORS)}</div>
+      ${makeRecent(db.projects.recent)}
+    </div>
+    <div class="db-card">
+      <div class="db-head"><span class="db-icon">📚</span><span class="db-name">Sources</span><span class="db-count" style="color:var(--amber)">${db.sources.total}</span></div>
+      <div class="db-bar">${makeBar(db.sources.primary||{}, db.sources.total, STATUS_COLORS)}</div>
+      <div class="db-breakdown">${makeChips(db.sources.secondary.domain||{}, DOMAIN_COLORS)}</div>
+      ${makeRecent(db.sources.recent)}
+    </div>
+    <div class="db-card">
+      <div class="db-head"><span class="db-icon">🧠</span><span class="db-name">Wiki</span><span class="db-count" style="color:var(--purple)">${db.wiki.total}</span></div>
+      <div class="db-bar">${makeBar(db.wiki.primary||{}, db.wiki.total, STATUS_COLORS)}</div>
+      <div class="db-breakdown">${makeChips(db.wiki.secondary.domain||{}, DOMAIN_COLORS)}</div>
+      ${makeRecent(db.wiki.recent)}
+    </div>
+    <div class="db-card">
+      <div class="db-head"><span class="db-icon">📄</span><span class="db-name">Outputs</span><span class="db-count" style="color:var(--pink)">${db.outputs.total}</span></div>
+      <div class="db-bar">${makeBar(db.outputs.primary||{}, db.outputs.total, STATUS_COLORS)}</div>
+      <div class="db-breakdown">${makeChips(db.outputs.secondary.type||{}, STATUS_COLORS)}</div>
+      ${makeRecent(db.outputs.recent)}
+    </div>
+    <div class="db-card">
+      <div class="db-head"><span class="db-icon">📋</span><span class="db-name">Tasks</span><span class="db-count" style="color:var(--blue)">${db.tasks.total}</span></div>
+      <div class="db-bar">${makeBar(db.tasks.primary||{}, db.tasks.total, STATUS_COLORS)}</div>
+      <div class="db-breakdown">${makeChips(db.tasks.secondary.type||{}, STATUS_COLORS)}</div>
+      ${db.tasks.recent && db.tasks.recent.length ? `<div class="db-recent"><div class="db-recent-title">Recent</div>${
+        db.tasks.recent.slice(0,3).map(item => {
+          const title = item.title || '(untitled)';
+          const status = item.status || '';
+          const sc = STATUS_COLORS[status] || '#6b7280';
+          return `<div class="db-recent-item">
+            ${status ? `<span class="badge" style="color:${sc};background:${sc}15">${status}</span>` : ''}
+            <span title="${title}">${title}</span>
+            <button class="task-status-btn" onclick="updateTaskStatus(${item.id}, 'Done')" style="color:${sc};border-color:${sc}30">→Done</button>
+          </div>`;
+        }).join('')
+      }</div>` : ''}
+    </div>
+    <div class="db-card">
+      <div class="db-head"><span class="db-icon">📝</span><span class="db-name">Activity Log</span><span class="db-count" style="color:var(--cyan)">${db.activity_log.total}</span></div>
+      <div class="db-bar">${makeBar(db.activity_log.primary||{}, db.activity_log.total, STATUS_COLORS)}</div>
+      <div class="db-breakdown">${makeChips(db.activity_log.secondary.actor||{}, STATUS_COLORS)}</div>
+      ${makeRecent(db.activity_log.recent)}
+    </div>
+  `;
+}
+
+function renderFlow(data) {
+  const db = data.databases;
+  const el = document.getElementById('flow-container');
+  el.innerHTML = `
+    <div class="flow-row"><div class="flow-dot" style="background:var(--green)"></div><span class="flow-name">🔬 Projects</span><div class="flow-line"></div><span class="flow-desc">课题拆解 → 任务分配</span><span class="flow-count" style="color:var(--green)">${db.projects.total}</span></div>
+    <div class="flow-row flow-indent"><span class="flow-arrow">↳</span><div class="flow-dot" style="background:var(--amber)"></div><span class="flow-name">📚 Sources</span><div class="flow-line"></div><span class="flow-desc">采集 → 摘要</span><span class="flow-count" style="color:var(--amber)">${db.sources.total}</span></div>
+    <div class="flow-row flow-indent"><span class="flow-arrow" style="padding-left:1.5rem">↳</span><div class="flow-dot" style="background:var(--purple)"></div><span class="flow-name">🧠 Wiki</span><div class="flow-line"></div><span class="flow-desc">概念提炼</span><span class="flow-count" style="color:var(--purple)">${db.wiki.total}</span></div>
+    <div class="flow-row flow-indent"><span class="flow-arrow" style="padding-left:3rem">↳</span><div class="flow-dot" style="background:var(--pink)"></div><span class="flow-name">📄 Outputs</span><div class="flow-line"></div><span class="flow-desc">综合产出 → 审核</span><span class="flow-count" style="color:var(--pink)">${db.outputs.total}</span></div>
+  `;
+}
+
+function populateProjectDropdown(data) {
+  const sel = document.getElementById('src-project');
+  if (!sel) return;
+  const recent = (data.databases.projects && data.databases.projects.recent) || [];
+  sel.innerHTML = '<option value=\"\">无</option>' + recent.map(p => `<option value=\"${p.id}\">${p.title || p.name || ('项目 #' + p.id)}</option>`).join('');
+}
+
+async function loadData() {
+  try {
+    document.getElementById('update-time').innerHTML = '<span class="live-dot"></span>fetching...';
+    const resp = await fetch('/api/dashboard/stats');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    renderStats(data);
+    renderAgents(data);
+    renderDatabases(data);
+    renderFlow(data);
+    populateProjectDropdown(data);
+
+    const ts = new Date(data.timestamp);
+    document.getElementById('update-time').innerHTML =
+      `<span class="live-dot"></span>Last updated: ${ts.toLocaleString('zh-CN')}`;
+  } catch (err) {
+    console.error(err);
+    document.getElementById('update-time').innerHTML =
+      `<span style="color:var(--red)">⚠ ${err.message}</span>`;
+    document.getElementById('db-grid').innerHTML =
+      `<div class="error-box" style="grid-column:1/-1">连接失败: ${err.message}</div>`;
+  }
+}
+
+async function triggerAgent(key) {
+  try {
+    const resp = await fetch('/api/trigger', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({agent: key})
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed');
+    showToast(`${key} triggered: ${data.events.length} events`, 'success');
+    loadData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function submitSource() {
+  const title = document.getElementById('src-title').value.trim();
+  if (!title) return showToast('标题不能为空', 'error');
+  const body = {
+    title,
+    url: document.getElementById('src-url').value.trim(),
+    source_type: document.getElementById('src-type').value,
+    domain: document.getElementById('src-domain').value,
+    project_ref: document.getElementById('src-project').value ? parseInt(document.getElementById('src-project').value) : null,
+  };
+  try {
+    const resp = await fetch('/api/sources', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error('Failed');
+    showToast(`素材已添加: ${title}`, 'success');
+    document.getElementById('src-title').value = '';
+    document.getElementById('src-url').value = '';
+    loadData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function submitProject() {
+  const name = document.getElementById('proj-name').value.trim();
+  if (!name) return showToast('名称不能为空', 'error');
+  const body = {
+    name,
+    domain: document.getElementById('proj-domain').value,
+    research_questions: document.getElementById('proj-questions').value.trim(),
+    scope: '',
+    output_type: document.getElementById('proj-output').value,
+    priority: document.getElementById('proj-priority').value,
+  };
+  try {
+    const resp = await fetch('/api/projects', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error('Failed');
+    showToast(`课题已创建: ${name}`, 'success');
+    document.getElementById('proj-name').value = '';
+    document.getElementById('proj-questions').value = '';
+    loadData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function updateTaskStatus(taskId, newStatus) {
+  try {
+    const resp = await fetch(`/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({status: newStatus})
+    });
+    if (!resp.ok) throw new Error('Failed');
+    showToast(`任务 #${taskId} → ${newStatus}`, 'success');
+    loadData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function showToast(message, type = 'success') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+// Auto-refresh every 60 seconds
+loadData();
+setInterval(loadData, 60000);
+</script>
+</body>
+</html>
