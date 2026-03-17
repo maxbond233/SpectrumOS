@@ -98,3 +98,125 @@ class DashboardStatsResponse(BaseModel):
     timestamp: str
     agents: list[AgentInfo]
     databases: dict[str, TableStats]
+
+
+# ── Pagination ────────────────────────────────────────────────────────────────
+
+class PaginatedResponse(BaseModel):
+    items: list[dict]
+    total: int
+    limit: int
+    offset: int
+
+
+# ── Source ────────────────────────────────────────────────────────────────────
+
+class SourceResponse(BaseModel):
+    id: int
+    title: str
+    source_type: str
+    status: str
+    priority: str
+    domain: str
+    url: str
+    project_ref: int | None
+    review_needed: bool
+    created_at: str
+
+
+class SourceDetailResponse(SourceResponse):
+    authors: str
+    year: str
+    output_type: str
+    extracted_summary: str
+    key_questions: str
+    why_it_matters: str
+    assigned_agent: str
+    updated_at: str
+
+
+# ── WikiCard ──────────────────────────────────────────────────────────────────
+
+class WikiCardResponse(BaseModel):
+    id: int
+    concept: str
+    type: str
+    domain: str
+    maturity: str
+    project_ref: int | None
+    needs_review: bool
+    created_at: str
+
+
+class WikiCardDetailResponse(WikiCardResponse):
+    definition: str
+    explanation: str
+    key_points: str
+    example: str
+    reading_ref: int | None
+    assigned_agent: str
+    updated_at: str
+
+
+# ── Output ────────────────────────────────────────────────────────────────────
+
+class OutputResponse(BaseModel):
+    id: int
+    name: str
+    type: str
+    status: str
+    domain: str
+    project_ref: int | None
+    word_count: int | None
+    review_needed: bool
+    created_at: str
+
+
+class OutputDetailResponse(OutputResponse):
+    content: str
+    ai_notes: str
+    assigned_agent: str
+    updated_at: str
+
+
+# ── Project Detail ────────────────────────────────────────────────────────────
+
+class ProjectDetailResponse(ProjectResponse):
+    research_questions: str
+    scope: str
+    deadline: str
+    assigned_agent: str
+    ai_notes: str
+    review_needed: bool
+    created_at: str
+    updated_at: str
+
+
+# ── Task Detail ───────────────────────────────────────────────────────────────
+
+class TaskDetailResponse(TaskResponse):
+    priority: str
+    depends_on: str
+    message: str
+    source_ref: int | None
+    ai_notes: str
+    retry_count: int
+    review_needed: bool
+    created_at: str
+    updated_at: str
+
+
+# ── Activity Log ──────────────────────────────────────────────────────────────
+
+class LogResponse(BaseModel):
+    id: int
+    title: str
+    actor: str
+    action_type: str
+    target_db: str
+    target_record: str
+    before: str
+    after: str
+    notes: str
+    needs_review: bool
+    created_at: str

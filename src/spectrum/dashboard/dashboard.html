@@ -187,6 +187,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
     <h1><span>光谱</span> OS</h1>
     <p>棱镜系统总控台 · Multi-Agent Knowledge Operating System</p>
     <div class="update-time" id="update-time"><span class="live-dot"></span>loading...</div>
+    <div class="notion-links">
+      <a class="notion-link" href="/explorer">🔍 Explorer</a>
+    </div>
   </div>
 
   <!-- Stats -->
@@ -387,31 +390,31 @@ function renderDatabases(data) {
   const grid = document.getElementById('db-grid');
 
   grid.innerHTML = `
-    <div class="db-card">
+    <a class="db-card" href="/explorer#sources">
       <div class="db-head"><span class="db-icon">🔬</span><span class="db-name">Research Projects</span><span class="db-count" style="color:var(--green)">${db.projects.total}</span></div>
       <div class="db-bar">${makeBar(db.projects.primary||{}, db.projects.total, STATUS_COLORS)}</div>
       <div class="db-breakdown">${makeChips(db.projects.secondary.domain||{}, DOMAIN_COLORS)}</div>
       ${makeRecent(db.projects.recent)}
-    </div>
-    <div class="db-card">
+    </a>
+    <a class="db-card" href="/explorer#sources">
       <div class="db-head"><span class="db-icon">📚</span><span class="db-name">Sources</span><span class="db-count" style="color:var(--amber)">${db.sources.total}</span></div>
       <div class="db-bar">${makeBar(db.sources.primary||{}, db.sources.total, STATUS_COLORS)}</div>
       <div class="db-breakdown">${makeChips(db.sources.secondary.domain||{}, DOMAIN_COLORS)}</div>
       ${makeRecent(db.sources.recent)}
-    </div>
-    <div class="db-card">
+    </a>
+    <a class="db-card" href="/explorer#wiki">
       <div class="db-head"><span class="db-icon">🧠</span><span class="db-name">Wiki</span><span class="db-count" style="color:var(--purple)">${db.wiki.total}</span></div>
       <div class="db-bar">${makeBar(db.wiki.primary||{}, db.wiki.total, STATUS_COLORS)}</div>
       <div class="db-breakdown">${makeChips(db.wiki.secondary.domain||{}, DOMAIN_COLORS)}</div>
       ${makeRecent(db.wiki.recent)}
-    </div>
-    <div class="db-card">
+    </a>
+    <a class="db-card" href="/explorer#outputs">
       <div class="db-head"><span class="db-icon">📄</span><span class="db-name">Outputs</span><span class="db-count" style="color:var(--pink)">${db.outputs.total}</span></div>
       <div class="db-bar">${makeBar(db.outputs.primary||{}, db.outputs.total, STATUS_COLORS)}</div>
       <div class="db-breakdown">${makeChips(db.outputs.secondary.type||{}, STATUS_COLORS)}</div>
       ${makeRecent(db.outputs.recent)}
-    </div>
-    <div class="db-card">
+    </a>
+    <a class="db-card" href="/explorer#tasks">
       <div class="db-head"><span class="db-icon">📋</span><span class="db-name">Tasks</span><span class="db-count" style="color:var(--blue)">${db.tasks.total}</span></div>
       <div class="db-bar">${makeBar(db.tasks.primary||{}, db.tasks.total, STATUS_COLORS)}</div>
       <div class="db-breakdown">${makeChips(db.tasks.secondary.type||{}, STATUS_COLORS)}</div>
@@ -423,17 +426,17 @@ function renderDatabases(data) {
           return `<div class="db-recent-item">
             ${status ? `<span class="badge" style="color:${sc};background:${sc}15">${status}</span>` : ''}
             <span title="${title}">${title}</span>
-            <button class="task-status-btn" onclick="updateTaskStatus(${item.id}, 'Done')" style="color:${sc};border-color:${sc}30">→Done</button>
+            <button class="task-status-btn" onclick="event.preventDefault();updateTaskStatus(${item.id}, 'Done')" style="color:${sc};border-color:${sc}30">→Done</button>
           </div>`;
         }).join('')
       }</div>` : ''}
-    </div>
-    <div class="db-card">
+    </a>
+    <a class="db-card" href="/explorer#logs">
       <div class="db-head"><span class="db-icon">📝</span><span class="db-name">Activity Log</span><span class="db-count" style="color:var(--cyan)">${db.activity_log.total}</span></div>
       <div class="db-bar">${makeBar(db.activity_log.primary||{}, db.activity_log.total, STATUS_COLORS)}</div>
       <div class="db-breakdown">${makeChips(db.activity_log.secondary.actor||{}, STATUS_COLORS)}</div>
       ${makeRecent(db.activity_log.recent)}
-    </div>
+    </a>
   `;
 }
 

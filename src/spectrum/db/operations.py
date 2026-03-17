@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Sequence, TypeVar
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectrum.db.engine import get_session_factory
@@ -47,15 +47,31 @@ class DatabaseOps:
         order_by: str | None = None,
     ) -> Sequence[T]:
         async with self._session() as session:
+            _filters = dict(filters) if filters else {}
+            limit = _filters.pop("_limit", None)
+            offset = _filters.pop("_offset", None)
+
             stmt = select(model)
-            if filters:
-                for key, value in filters.items():
-                    stmt = stmt.where(getattr(model, key) == value)
+            for key, value in _filters.items():
+                stmt = stmt.where(getattr(model, key) == value)
             if order_by:
                 col = getattr(model, order_by.lstrip("-"))
                 stmt = stmt.order_by(col.desc() if order_by.startswith("-") else col)
+            if offset:
+                stmt = stmt.offset(offset)
+            if limit:
+                stmt = stmt.limit(limit)
             result = await session.execute(stmt)
             return result.scalars().all()
+
+    async def _count(self, model: type[T], filters: dict[str, Any] | None = None) -> int:
+        async with self._session() as session:
+            stmt = select(func.count(model.id))
+            if filters:
+                for key, value in filters.items():
+                    stmt = stmt.where(getattr(model, key) == value)
+            result = await session.execute(stmt)
+            return result.scalar_one()
 
     async def _create(self, instance: T) -> T:
         async with self._session() as session:

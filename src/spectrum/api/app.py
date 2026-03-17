@@ -14,6 +14,7 @@ from spectrum.db.operations import DatabaseOps
 from spectrum.orchestrator.scheduler import Scheduler
 
 DASHBOARD_HTML = Path(__file__).resolve().parent.parent / "dashboard" / "dashboard.html"
+EXPLORER_HTML = Path(__file__).resolve().parent.parent / "dashboard" / "explorer.html"
 
 
 def create_app(
@@ -41,5 +42,9 @@ def create_app(
     @app.get("/")
     async def serve_dashboard():
         return FileResponse(DASHBOARD_HTML, media_type="text/html")
+
+    @app.get("/explorer")
+    async def serve_explorer():
+        return FileResponse(EXPLORER_HTML, media_type="text/html")
 
     return app

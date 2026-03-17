@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光谱 OS · Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#06080d;--bg2:rgba(255,255,255,.03);--bg3:rgba(255,255,255,.06);
+  --bd:rgba(255,255,255,.06);--bd2:rgba(255,255,255,.12);
+  --t1:rgba(255,255,255,.92);--t2:rgba(255,255,255,.5);--t3:rgba(255,255,255,.28);
+  --purple:#8b5cf6;--blue:#3b82f6;--cyan:#06b6d4;--green:#10b981;
+  --amber:#f59e0b;--red:#ef4444;--pink:#ec4899;
+  --r:12px;--r-sm:8px;--r-lg:16px;
+  --sans:'Noto Sans SC',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+html{font-size:15px}
+body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100vh;overflow-x:hidden}
+
+.ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.ambient::before{content:'';position:absolute;width:600px;height:600px;top:-200px;left:-100px;background:radial-gradient(circle,rgba(139,92,246,.08) 0%,transparent 70%);animation:drift 20s ease-in-out infinite}
+.ambient::after{content:'';position:absolute;width:500px;height:500px;bottom:-150px;right:-100px;background:radial-gradient(circle,rgba(6,182,212,.06) 0%,transparent 70%);animation:drift 25s ease-in-out infinite reverse}
+@keyframes drift{0%,100%{transform:translate(0,0)}33%{transform:translate(40px,30px)}66%{transform:translate(-20px,50px)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.layout{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:1.5rem 1.5rem 3rem;display:flex;flex-direction:column;gap:1rem}
+
+.header{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.2rem;border-radius:var(--r-lg);background:linear-gradient(135deg,rgba(139,92,246,.18),rgba(6,182,212,.08));border:1px solid rgba(139,92,246,.35);backdrop-filter:blur(18px);box-shadow:0 18px 45px rgba(15,23,42,.6)}
+.header-left{display:flex;align-items:center;gap:.8rem}
+.header-title{font-size:1.15rem;font-weight:500;letter-spacing:.04em;text-transform:uppercase}
+.header-sub{font-size:.72rem;color:var(--t2);font-family:var(--mono)}
+.back-link{font-size:.72rem;font-family:var(--mono);color:var(--t2);text-decoration:none;padding:6px 12px;border-radius:999px;border:1px solid rgba(148,163,184,.6);background:rgba(15,23,42,.7);display:inline-flex;align-items:center;gap:6px;transition:all .2s}
+.back-link:hover{color:var(--t1);border-color:var(--bd2);background:rgba(15,23,42,.9)}
+
+.main{display:flex;gap:1.2rem;min-height:520px}
+.sidebar{width:190px;background:var(--bg2);border-radius:var(--r-lg);border:1px solid var(--bd);padding:1rem .9rem;display:flex;flex-direction:column;gap:.4rem}
+.sidebar-title{font-size:.7rem;color:var(--t3);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px;margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px solid rgba(148,163,184,.25)}
+.nav-item{display:flex;align-items:center;gap:.5rem;padding:.45rem .55rem;border-radius:10px;font-size:.8rem;color:var(--t2);cursor:pointer;transition:all .2s}
+.nav-item span.emoji{width:1.2rem;text-align:center}
+.nav-item.active{background:var(--bg3);color:var(--t1);border:1px solid var(--bd2)}
+.nav-item:hover{background:var(--bg3);color:var(--t1)}
+
+.content{flex:1;background:var(--bg2);border-radius:var(--r-lg);border:1px solid var(--bd);padding:1.2rem 1.3rem;min-height:100%;animation:fadeUp .35s ease both}
+
+.filter-bar{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.8rem;align-items:center}
+.filter-label{font-size:.68rem;color:var(--t3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.6px;margin-right:.4rem}
+.filter-select{padding:4px 10px;border-radius:999px;border:1px solid var(--bd);background:var(--bg);color:var(--t1);font-size:.75rem;font-family:var(--sans);outline:none;min-width:110px}
+.filter-select:focus{border-color:var(--purple)}
+
+.table{width:100%;border-collapse:collapse;font-size:.78rem}
+.table thead{background:rgba(15,23,42,.9)}
+.table th,.table td{padding:.45rem .55rem;border-bottom:1px solid rgba(148,163,184,.3);text-align:left}
+.table th{font-size:.7rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.6px}
+.table tbody tr{cursor:pointer;transition:background .15s}
+.table tbody tr:hover{background:rgba(15,23,42,.85)}
+.badge{display:inline-flex;align-items:center;justify-content:center;padding:1px 7px;border-radius:999px;font-size:.64rem;font-family:var(--mono);border:1px solid rgba(148,163,184,.4);color:var(--t2)}
+
+.status-badge{border-radius:999px;padding:1px 7px;font-size:.64rem;font-family:var(--mono)}
+
+.pagination{display:flex;align-items:center;justify-content:space-between;margin-top:.8rem;font-size:.72rem;color:var(--t3);font-family:var(--mono)}
+.pager-btn{padding:4px 10px;border-radius:999px;border:1px solid var(--bd);background:none;color:var(--t2);font-size:.72rem;font-family:var(--mono);cursor:pointer;transition:all .15s}
+.pager-btn[disabled]{opacity:.4;cursor:not-allowed}
+.pager-btn:not([disabled]):hover{border-color:var(--bd2);color:var(--t1);background:var(--bg3)}
+
+.detail-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem}
+.detail-back{font-size:.72rem;font-family:var(--mono);color:var(--t2);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.detail-back:hover{color:var(--t1)}
+.detail-title{font-size:1rem;font-weight:500}
+.meta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem;margin-bottom:.8rem;font-size:.76rem}
+.meta-item-label{font-size:.65rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
+.meta-item-value{font-size:.78rem;color:var(--t1)}
+.meta-link{color:var(--blue);text-decoration:none;font-size:.76rem}
+.meta-link:hover{text-decoration:underline}
+
+.section-card{background:var(--bg3);border-radius:var(--r);border:1px solid var(--bd);padding:.8rem .9rem;margin-top:.7rem}
+.section-title{font-size:.78rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:.35rem}
+.section-body{font-size:.8rem;color:var(--t2);white-space:pre-wrap;line-height:1.6}
+
+.timeline{display:flex;flex-direction:column;gap:.6rem;font-size:.76rem}
+.log-item{padding:.55rem .65rem;border-radius:var(--r-sm);border:1px solid var(--bd);background:rgba(15,23,42,.9)}
+.log-row{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;margin-bottom:.25rem}
+.log-time{font-size:.7rem;color:var(--t3);font-family:var(--mono)}
+.log-title{font-size:.8rem;color:var(--t1)}
+.actor-badge{padding:1px 6px;border-radius:999px;font-size:.64rem;font-family:var(--mono);background:rgba(148,163,184,.15);border:1px solid rgba(148,163,184,.4)}
+.chip{padding:1px 6px;border-radius:999px;font-size:.64rem;font-family:var(--mono);background:rgba(15,23,42,.9);border:1px solid rgba(148,163,184,.4)}
+.log-meta{font-size:.7rem;color:var(--t2)}
+.log-more{margin-top:.3rem;font-size:.72rem;color:var(--t2);cursor:pointer}
+.log-more:hover{color:var(--t1)}
+
+.fold{margin-top:.4rem;background:rgba(15,23,42,.9);border-radius:var(--r-sm);border:1px solid var(--bd);padding:.5rem .6rem;font-size:.75rem}
+.fold-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer}
+.fold-body{margin-top:.3rem;white-space:pre-wrap;color:var(--t2)}
+
+.loading{display:flex;align-items:center;justify-content:center;padding:2rem;color:var(--t3);font-size:.8rem;gap:.5rem}
+.spinner{width:16px;height:16px;border:2px solid var(--bd);border-top-color:var(--purple);border-radius:50%;animation:spin .8s linear infinite}
+.error-box{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:var(--r);padding:1rem;text-align:center;color:var(--red);font-size:.8rem}
+
+@media(max-width:900px){
+  .main{flex-direction:column}
+  .sidebar{width:100%;flex-direction:row;overflow-x:auto}
+  .sidebar-title{border-bottom:none;margin-bottom:0;margin-right:.6rem}
+}
+@media(max-width:600px){
+  .layout{padding:1rem}
+  .meta-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="ambient"></div>
+<div class="layout">
+  <header class="header">
+    <div class="header-left">
+      <span>🛰️</span>
+      <div>
+        <div class="header-title">Spectrum Explorer</div>
+        <div class="header-sub">深度浏览 · Sources / Wiki / Outputs / Tasks / Logs</div>
+      </div>
+    </div>
+    <a href="/" class="back-link">← 返回 Dashboard</a>
+  </header>
+  <div class="main">
+    <aside class="sidebar">
+      <div class="sidebar-title">Explorer</div>
+      <div class="nav-item" data-view="sources"><span class="emoji">📚</span><span>素材 Sources</span></div>
+      <div class="nav-item" data-view="wiki"><span class="emoji">🧠</span><span>知识卡 Wiki</span></div>
+      <div class="nav-item" data-view="outputs"><span class="emoji">📄</span><span>产出 Outputs</span></div>
+      <div class="nav-item" data-view="tasks"><span class="emoji">🎯</span><span>任务 Tasks</span></div>
+      <div class="nav-item" data-view="logs"><span class="emoji">📋</span><span>活动日志 Logs</span></div>
+    </aside>
+    <main id="content" class="content"></main>
+  </div>
+</div>
+
+<script>
+const STATUS_COLORS = {
+  'Inbox':'#6b7280','Todo':'#3b82f6','Doing':'#f59e0b','Waiting':'#8b5cf6',
+  'Done':'#10b981','Failed':'#ef4444','Archived':'#374151',
+  'Collected':'#6b7280','To Read':'#3b82f6','Reading':'#f59e0b','Processed':'#10b981',
+  'Seed':'#f59e0b','Growing':'#3b82f6','Stable':'#10b981',
+  '未开始':'#6b7280','进行中':'#3b82f6','完成':'#10b981',
+};
+
+const STATE = {
+  sources:{limit:20,offset:0,filters:{status:'',domain:'',project_ref:''},lastItems:[]},
+  wiki:{limit:20,offset:0,filters:{type:'',domain:'',maturity:'',project_ref:''},lastItems:[]},
+  outputs:{limit:20,offset:0,filters:{status:'',type:'',project_ref:''},lastItems:[]},
+  tasks:{limit:20,offset:0,filters:{status:'',agent:'',type:'',project_ref:''},lastItems:[]},
+  logs:{limit:50,offset:0,filters:{actor:'',action_type:'',target_db:''},lastItems:[]},
+};
+
+function setActiveNav(view){
+  document.querySelectorAll('.nav-item').forEach(el=>{
+    el.classList.toggle('active', el.dataset.view===view);
+  });
+}
+
+function badgeHtml(text,color){
+  const c = color || STATUS_COLORS[text] || '#6b7280';
+  return `<span class="status-badge" style="color:${c};border:1px solid ${c}40;background:${c}10">${text}</span>`;
+}
+
+function formatDate(iso){
+  if(!iso) return '';
+  try{
+    return new Date(iso).toLocaleString('zh-CN');
+  }catch(e){return iso;}
+}
+
+async function fetchList(endpoint, params){
+  const url = new URL('/api/'+endpoint, location.origin);
+  Object.entries(params||{}).forEach(([k,v])=>{ if(v!=='' && v!=null) url.searchParams.set(k,v); });
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('HTTP '+resp.status);
+  return resp.json();
+}
+
+async function fetchDetail(endpoint, id){
+  const resp = await fetch(`/api/${endpoint}/${id}`);
+  if(!resp.ok) throw new Error('Not found');
+  return resp.json();
+}
+
+function renderList(view){
+  setActiveNav(view);
+  const content = document.getElementById('content');
+  if(view==='sources'){
+    const st = STATE.sources;
+    content.innerHTML = `
+      <div class="filter-bar">
+        <span class="filter-label">素材筛选</span>
+        <select id="f-src-status" class="filter-select">
+          <option value="">全部状态</option>
+          <option value="Collected">Collected</option>
+          <option value="To Read">To Read</option>
+          <option value="Reading">Reading</option>
+          <option value="Processed">Processed</option>
+        </select>
+        <select id="f-src-domain" class="filter-select">
+          <option value="">全部领域</option>
+          <option>生物信息</option><option>AI</option><option>编程</option>
+          <option>数学</option><option>英语</option><option>科研方法</option>
+        </select>
+      </div>
+      <div id="list-area"></div>
+    `;
+    document.getElementById('f-src-status').value = st.filters.status;
+    document.getElementById('f-src-domain').value = st.filters.domain;
+    document.getElementById('f-src-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;renderList('sources');};
+    document.getElementById('f-src-domain').onchange = e=>{st.filters.domain=e.target.value;st.offset=0;renderList('sources');};
+    loadSources();
+  }else if(view==='wiki'){
+    const st = STATE.wiki;
+    content.innerHTML = `
+      <div class="filter-bar">
+        <span class="filter-label">知识卡筛选</span>
+        <select id="f-wiki-type" class="filter-select">
+          <option value="">全部类型</option>
+          <option>概念</option><option>方法</option><option>公式</option>
+        </select>
+        <select id="f-wiki-domain" class="filter-select">
+          <option value="">全部领域</option>
+          <option>生物信息</option><option>AI</option><option>编程</option>
+          <option>数学</option><option>英语</option><option>科研方法</option>
+        </select>
+        <select id="f-wiki-maturity" class="filter-select">
+          <option value="">全部成熟度</option>
+          <option>Seed</option><option>Growing</option><option>Stable</option>
+        </select>
+      </div>
+      <div id="list-area"></div>
+    `;
+    document.getElementById('f-wiki-type').value = st.filters.type;
+    document.getElementById('f-wiki-domain').value = st.filters.domain;
+    document.getElementById('f-wiki-maturity').value = st.filters.maturity;
+    document.getElementById('f-wiki-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;renderList('wiki');};
+    document.getElementById('f-wiki-domain').onchange = e=>{st.filters.domain=e.target.value;st.offset=0;renderList('wiki');};
+    document.getElementById('f-wiki-maturity').onchange = e=>{st.filters.maturity=e.target.value;st.offset=0;renderList('wiki');};
+    loadWiki();
+  }else if(view==='outputs'){
+    const st = STATE.outputs;
+    content.innerHTML = `
+      <div class="filter-bar">
+        <span class="filter-label">产出筛选</span>
+        <select id="f-out-status" class="filter-select">
+          <option value="">全部状态</option>
+          <option>未开始</option><option>进行中</option><option>完成</option>
+        </select>
+        <select id="f-out-type" class="filter-select">
+          <option value="">全部类型</option>
+          <option>综述</option><option>教程</option><option>笔记</option><option>报告</option><option>论文草稿</option>
+        </select>
+      </div>
+      <div id="list-area"></div>
+    `;
+    document.getElementById('f-out-status').value = st.filters.status;
+    document.getElementById('f-out-type').value = st.filters.type;
+    document.getElementById('f-out-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;renderList('outputs');};
+    document.getElementById('f-out-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;renderList('outputs');};
+    loadOutputs();
+  }else if(view==='tasks'){
+    const st = STATE.tasks;
+    content.innerHTML = `
+      <div class="filter-bar">
+        <span class="filter-label">任务筛选</span>
+        <select id="f-task-status" class="filter-select">
+          <option value="">全部状态</option>
+          <option>Inbox</option><option>Todo</option><option>Doing</option><option>Waiting</option><option>Done</option>
+        </select>
+        <select id="f-task-agent" class="filter-select">
+          <option value="">全部代理</option>
+          <option>棱镜</option><option>聚光</option><option>色散</option><option>衍射</option>
+        </select>
+        <select id="f-task-type" class="filter-select">
+          <option value="">全部类型</option>
+          <option>采集</option><option>分析</option><option>产出</option>
+        </select>
+      </div>
+      <div id="list-area"></div>
+    `;
+    document.getElementById('f-task-status').value = st.filters.status;
+    document.getElementById('f-task-agent').value = st.filters.agent;
+    document.getElementById('f-task-type').value = st.filters.type;
+    document.getElementById('f-task-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;renderList('tasks');};
+    document.getElementById('f-task-agent').onchange = e=>{st.filters.agent=e.target.value;st.offset=0;renderList('tasks');};
+    document.getElementById('f-task-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;renderList('tasks');};
+    loadTasks();
+  }else if(view==='logs'){
+    const st = STATE.logs;
+    content.innerHTML = `
+      <div class="filter-bar">
+        <span class="filter-label">日志筛选</span>
+        <select id="f-log-actor" class="filter-select">
+          <option value="">全部 Actor</option>
+          <option>human</option><option>棱镜</option><option>聚光</option><option>色散</option><option>衍射</option>
+        </select>
+        <select id="f-log-action" class="filter-select">
+          <option value="">全部动作</option>
+          <option>Create</option><option>Update</option><option>Summarize</option><option>Classify</option><option>Link</option><option>Review</option>
+        </select>
+        <select id="f-log-db" class="filter-select">
+          <option value="">全部库</option>
+          <option>Sources</option><option>Wiki</option><option>Research Projects</option><option>Agent Tasks</option><option>Outputs</option>
+        </select>
+      </div>
+      <div id="list-area"></div>
+    `;
+    document.getElementById('f-log-actor').value = st.filters.actor;
+    document.getElementById('f-log-action').value = st.filters.action_type;
+    document.getElementById('f-log-db').value = st.filters.target_db;
+    document.getElementById('f-log-actor').onchange = e=>{st.filters.actor=e.target.value;st.offset=0;renderList('logs');};
+    document.getElementById('f-log-action').onchange = e=>{st.filters.action_type=e.target.value;st.offset=0;renderList('logs');};
+    document.getElementById('f-log-db').onchange = e=>{st.filters.target_db=e.target.value;st.offset=0;renderList('logs');};
+    loadLogs();
+  }
+}
+
+async function loadSources(){
+  const st = STATE.sources;
+  const area = document.getElementById('list-area');
+  area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading sources...</div>`;
+  try{
+    const data = await fetchList('sources/list',{...st.filters,limit:st.limit,offset:st.offset});
+    st.lastItems = data.items || [];
+    const rows = st.lastItems.map(s=>{
+      const sc = STATUS_COLORS[s.status] || '#6b7280';
+      return `<tr onclick="location.hash='source/${s.id}'">
+        <td>${s.title}</td>
+        <td>${badgeHtml(s.status, sc)}</td>
+        <td>${s.domain||''}</td>
+        <td>${s.source_type||''}</td>
+        <td>${s.project_ref?`<a class="meta-link" href="#project/${s.project_ref}">#${s.project_ref}</a>`:''}</td>
+        <td>${formatDate(s.created_at)}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="6" style="padding:.8rem;color:var(--t3)">暂无数据</td></tr>`;
+    const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
+    const start = total?offset+1:0, end = Math.min(offset+limit,total);
+    const isFirst = offset<=0;
+    const isLast = offset+limit>=total;
+    area.innerHTML = `
+      <table class="table">
+        <thead><tr>
+          <th>Title</th><th>Status</th><th>Domain</th><th>Type</th><th>Project</th><th>Created</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="pagination">
+        <span>第 ${start}-${end} 条，共 ${total} 条</span>
+        <div>
+          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('sources',-1)">上一页</button>
+          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('sources',1)">下一页</button>
+        </div>
+      </div>
+    `;
+    st.limit = limit; st.offset = offset;
+  }catch(e){
+    area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadWiki(){
+  const st = STATE.wiki;
+  const area = document.getElementById('list-area');
+  area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading wiki...</div>`;
+  try{
+    const data = await fetchList('wiki-cards',{...st.filters,limit:st.limit,offset:st.offset});
+    st.lastItems = data.items || [];
+    if(!st.lastItems.length){
+      area.innerHTML = `<div class="error-box" style="text-align:left">暂无知识卡</div>`;return;
+    }
+    const cards = st.lastItems.map(w=>{
+      return `<div class="section-card" style="cursor:pointer" onclick="location.hash='wiki/${w.id}'">
+        <div class="detail-title" style="font-size:.9rem;margin-bottom:.25rem">${w.concept}</div>
+        <div style="display:flex;gap:.4rem;font-size:.7rem">
+          <span class="badge">${w.type||''}</span>
+          ${w.domain?`<span class="badge">${w.domain}</span>`:''}
+          ${w.maturity?badgeHtml(w.maturity):''}
+        </div>
+      </div>`;
+    }).join('');
+    const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
+    const start = total?offset+1:0, end = Math.min(offset+limit,total);
+    const isFirst = offset<=0;
+    const isLast = offset+limit>=total;
+    area.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.7rem">
+        ${cards}
+      </div>
+      <div class="pagination">
+        <span>第 ${start}-${end} 条，共 ${total} 条</span>
+        <div>
+          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('wiki',-1)">上一页</button>
+          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('wiki',1)">下一页</button>
+        </div>
+      </div>
+    `;
+    st.limit = limit; st.offset = offset;
+  }catch(e){
+    area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadOutputs(){
+  const st = STATE.outputs;
+  const area = document.getElementById('list-area');
+  area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading outputs...</div>`;
+  try{
+    const data = await fetchList('outputs',{...st.filters,limit:st.limit,offset:st.offset});
+    st.lastItems = data.items || [];
+    const rows = st.lastItems.map(o=>{
+      const sc = STATUS_COLORS[o.status] || '#6b7280';
+      return `<tr onclick="location.hash='output/${o.id}'">
+        <td>${o.name}</td>
+        <td>${o.type||''}</td>
+        <td>${badgeHtml(o.status, sc)}</td>
+        <td>${o.word_count||''}</td>
+        <td>${o.domain||''}</td>
+        <td>${formatDate(o.created_at)}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="6" style="padding:.8rem;color:var(--t3)">暂无数据</td></tr>`;
+    const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
+    const start = total?offset+1:0, end = Math.min(offset+limit,total);
+    const isFirst = offset<=0;
+    const isLast = offset+limit>=total;
+    area.innerHTML = `
+      <table class="table">
+        <thead><tr>
+          <th>Name</th><th>Type</th><th>Status</th><th>Words</th><th>Domain</th><th>Created</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="pagination">
+        <span>第 ${start}-${end} 条，共 ${total} 条</span>
+        <div>
+          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('outputs',-1)">上一页</button>
+          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('outputs',1)">下一页</button>
+        </div>
+      </div>
+    `;
+    st.limit = limit; st.offset = offset;
+  }catch(e){
+    area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadTasks(){
+  const st = STATE.tasks;
+  const area = document.getElementById('list-area');
+  area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading tasks...</div>`;
+  try{
+    const data = await fetchList('tasks/browse',{...st.filters,limit:st.limit,offset:st.offset});
+    st.lastItems = data.items || [];
+    const rows = st.lastItems.map(t=>{
+      const sc = STATUS_COLORS[t.status] || '#6b7280';
+      const deps = (t.depends_on||'').split(',').filter(x=>x.trim()).map(id=>`<span class="badge" onclick="event.stopPropagation();location.hash='task/${id.trim()}'">#${id.trim()}</span>`).join(' ');
+      return `<tr onclick="location.hash='task/${t.id}'">
+        <td>${t.name}</td>
+        <td>${badgeHtml(t.status, sc)}</td>
+        <td>${t.type||''}</td>
+        <td>${t.assigned_agent||''}</td>
+        <td>${deps||''}</td>
+        <td>${t.project_ref?`<a class="meta-link" href="#project/${t.project_ref}">#${t.project_ref}</a>`:''}</td>
+        <td>${t.retry_count||0}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="7" style="padding:.8rem;color:var(--t3)">暂无数据</td></tr>`;
+    const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
+    const start = total?offset+1:0, end = Math.min(offset+limit,total);
+    const isFirst = offset<=0;
+    const isLast = offset+limit>=total;
+    area.innerHTML = `
+      <table class="table">
+        <thead><tr>
+          <th>Name</th><th>Status</th><th>Type</th><th>Agent</th><th>Depends</th><th>Project</th><th>Retries</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="pagination">
+        <span>第 ${start}-${end} 条，共 ${total} 条</span>
+        <div>
+          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('tasks',-1)">上一页</button>
+          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('tasks',1)">下一页</button>
+        </div>
+      </div>
+    `;
+    st.limit = limit; st.offset = offset;
+  }catch(e){
+    area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadLogs(){
+  const st = STATE.logs;
+  const area = document.getElementById('list-area');
+  area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading logs...</div>`;
+  try{
+    const data = await fetchList('logs',{...st.filters,limit:st.limit,offset:st.offset});
+    st.lastItems = data.items || [];
+    const logs = st.lastItems.map(l=>{
+      const actorColor = l.actor==='human' ? '#e5e7eb' : '#8b5cf6';
+      return `<div class="log-item">
+        <div class="log-row">
+          <span class="log-time">${formatDate(l.created_at)}</span>
+          <span class="actor-badge" style="color:${actorColor};border-color:${actorColor}40;background:${actorColor}10">${l.actor}</span>
+          <span class="chip">${l.action_type}</span>
+          <span class="log-meta">${l.target_db||''}${l.target_record?` #${l.target_record}`:''}</span>
+        </div>
+        <div class="log-title">${l.title}</div>
+        ${(l.before||l.after)?`
+          <div class="log-more" onclick="toggleLogDetail(this)">查看 before / after</div>
+          <div class="fold" style="display:none">
+            <div class="section-title" style="margin-bottom:.2rem">Before</div>
+            <div class="section-body">${(l.before||'').replace(/</g,'&lt;')}</div>
+            <div class="section-title" style="margin:.4rem 0 .2rem">After</div>
+            <div class="section-body">${(l.after||'').replace(/</g,'&lt;')}</div>
+          </div>
+        `:''}
+      </div>`;
+    }).join('') || `<div class="error-box" style="text-align:left">暂无日志</div>`;
+    const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
+    const start = total?offset+1:0, end = Math.min(offset+limit,total);
+    const isFirst = offset<=0;
+    const isLast = offset+limit>=total;
+    area.innerHTML = `
+      <div class="timeline">${logs}</div>
+      <div class="pagination">
+        <span>第 ${start}-${end} 条，共 ${total} 条</span>
+        <div>
+          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('logs',-1)">上一页</button>
+          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('logs',1)">下一页</button>
+        </div>
+      </div>
+    `;
+    st.limit = limit; st.offset = offset;
+  }catch(e){
+    area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+  }
+}
+
+function changePage(view, delta){
+  const st = STATE[view];
+  if(!st) return;
+  const newOffset = st.offset + delta*(st.limit||20);
+  if(newOffset<0) return;
+  st.offset = newOffset;
+  renderList(view);
+}
+
+function toggleLogDetail(el){
+  const fold = el.nextElementSibling;
+  if(!fold) return;
+  const visible = fold.style.display !== 'none';
+  fold.style.display = visible ? 'none' : 'block';
+}
+
+async function renderDetail(view,id){
+  const content = document.getElementById('content');
+  if(view==='source'){
+    content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading source #${id}...</div>`;
+    try{
+      const s = await fetchDetail('sources',id);
+      const sc = STATUS_COLORS[s.status] || '#6b7280';
+      content.innerHTML = `
+        <div class="detail-header">
+          <div class="detail-back" onclick="location.hash='sources'">← 返回素材列表</div>
+        </div>
+        <div class="detail-title" style="margin-bottom:.4rem">${s.title||'(untitled)'}</div>
+        <div style="margin-bottom:.6rem">${badgeHtml(s.status, sc)} ${s.domain?badgeHtml(s.domain):''}</div>
+        <div class="meta-grid">
+          <div><div class="meta-item-label">URL</div><div class="meta-item-value">${s.url?`<a href="${s.url}" target="_blank" class="meta-link">${s.url}</a>`:'-'}</div></div>
+          <div><div class="meta-item-label">Type</div><div class="meta-item-value">${s.source_type||'-'}</div></div>
+          <div><div class="meta-item-label">Authors</div><div class="meta-item-value">${s.authors||'-'}</div></div>
+          <div><div class="meta-item-label">Year</div><div class="meta-item-value">${s.year||'-'}</div></div>
+          <div><div class="meta-item-label">Project</div><div class="meta-item-value">${s.project_ref?`<a class="meta-link" href="#project/${s.project_ref}">#${s.project_ref}</a>`:'-'}</div></div>
+          <div><div class="meta-item-label">Created</div><div class="meta-item-value">${formatDate(s.created_at)}</div></div>
+        </div>
+        ${s.extracted_summary?`<div class="section-card"><div class="section-title">摘要</div><div class="section-body">${s.extracted_summary}</div></div>`:''}
+        ${s.key_questions?`<div class="section-card"><div class="section-title">关键问题</div><div class="section-body">${s.key_questions}</div></div>`:''}
+        ${s.why_it_matters?`<div class="section-card"><div class="section-title">重要性</div><div class="section-body">${s.why_it_matters}</div></div>`:''}
+      `;
+    }catch(e){
+      content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+    }
+  }else if(view==='wiki'){
+    content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading wiki #${id}...</div>`;
+    try{
+      const w = await fetchDetail('wiki-cards',id);
+      content.innerHTML = `
+        <div class="detail-header">
+          <div class="detail-back" onclick="location.hash='wiki'">← 返回知识卡列表</div>
+        </div>
+        <div class="detail-title" style="margin-bottom:.4rem">${w.concept||'(untitled)'}</div>
+        <div style="margin-bottom:.6rem;display:flex;gap:.4rem;font-size:.72rem">
+          ${w.type?`<span class="badge">${w.type}</span>`:''}
+          ${w.domain?`<span class="badge">${w.domain}</span>`:''}
+          ${w.maturity?badgeHtml(w.maturity):''}
+        </div>
+        <div class="meta-grid">
+          <div><div class="meta-item-label">Project</div><div class="meta-item-value">${w.project_ref?`<a class="meta-link" href="#project/${w.project_ref}">#${w.project_ref}</a>`:'-'}</div></div>
+          <div><div class="meta-item-label">Reading Ref</div><div class="meta-item-value">${w.reading_ref?`<a class="meta-link" href="#source/${w.reading_ref}">Source #${w.reading_ref}</a>`:'-'}</div></div>
+          <div><div class="meta-item-label">Created</div><div class="meta-item-value">${formatDate(w.created_at)}</div></div>
+          <div><div class="meta-item-label">Updated</div><div class="meta-item-value">${formatDate(w.updated_at)}</div></div>
+        </div>
+        ${w.definition?`<div class="section-card"><div class="section-title">定义</div><div class="section-body">${w.definition}</div></div>`:''}
+        ${w.explanation?`<div class="section-card"><div class="section-title">解释</div><div class="section-body">${w.explanation}</div></div>`:''}
+        ${w.key_points?`<div class="section-card"><div class="section-title">要点</div><div class="section-body">${w.key_points}</div></div>`:''}
+        ${w.example?`<div class="section-card"><div class="section-title">示例</div><div class="section-body">${w.example}</div></div>`:''}
+      `;
+    }catch(e){
+      content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+    }
+  }else if(view==='output'){
+    content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading output #${id}...</div>`;
+    try{
+      const o = await fetchDetail('outputs',id);
+      const sc = STATUS_COLORS[o.status] || '#6b7280';
+      content.innerHTML = `
+        <div class="detail-header">
+          <div class="detail-back" onclick="location.hash='outputs'">← 返回产出列表</div>
+        </div>
+        <div class="detail-title" style="margin-bottom:.4rem">${o.name||'(untitled)'}</div>
+        <div style="margin-bottom:.6rem;display:flex;gap:.4rem;align-items:center">
+          ${badgeHtml(o.status, sc)}
+          ${o.type?`<span class="badge">${o.type}</span>`:''}
+          ${o.domain?`<span class="badge">${o.domain}</span>`:''}
+        </div>
+        <div class="meta-grid">
+          <div><div class="meta-item-label">Words</div><div class="meta-item-value">${o.word_count||'-'}</div></div>
+          <div><div class="meta-item-label">Project</div><div class="meta-item-value">${o.project_ref?`<a class="meta-link" href="#project/${o.project_ref}">#${o.project_ref}</a>`:'-'}</div></div>
+          <div><div class="meta-item-label">Created</div><div class="meta-item-value">${formatDate(o.created_at)}</div></div>
+          <div><div class="meta-item-label">Updated</div><div class="meta-item-value">${formatDate(o.updated_at)}</div></div>
+        </div>
+        ${o.content?`<div class="section-card"><div class="section-title">内容</div><div class="section-body">${o.content}</div></div>`:''}
+        ${o.ai_notes?`<div class="section-card"><div class="section-title">AI Notes</div><div class="section-body">${o.ai_notes}</div></div>`:''}
+      `;
+    }catch(e){
+      content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+    }
+  }else if(view==='task'){
+    content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading task #${id}...</div>`;
+    try{
+      let t = (STATE.tasks.lastItems||[]).find(x=>String(x.id)===String(id));
+      if(!t){
+        const data = await fetchList('tasks/browse',{limit:1,offset:0,id});
+        t = (data.items||[])[0];
+      }
+      if(!t) throw new Error('Task not found');
+      const sc = STATUS_COLORS[t.status] || '#6b7280';
+      const deps = (t.depends_on||'').split(',').filter(x=>x.trim()).map(did=>`<a class="meta-link" href="#task/${did.trim()}">#${did.trim()}</a>`).join(' ，');
+      content.innerHTML = `
+        <div class="detail-header">
+          <div class="detail-back" onclick="location.hash='tasks'">← 返回任务列表</div>
+        </div>
+        <div class="detail-title" style="margin-bottom:.4rem">${t.name||'(untitled)'}</div>
+        <div style="margin-bottom:.6rem;display:flex;gap:.4rem;align-items:center">
+          ${badgeHtml(t.status, sc)}
+          ${t.type?`<span class="badge">${t.type}</span>`:''}
+          ${t.assigned_agent?`<span class="badge">${t.assigned_agent}</span>`:''}
+        </div>
+        <div class="meta-grid">
+          <div><div class="meta-item-label">Priority</div><div class="meta-item-value">${t.priority||'-'}</div></div>
+          <div><div class="meta-item-label">Project</div><div class="meta-item-value">${t.project_ref?`<a class="meta-link" href="#project/${t.project_ref}">#${t.project_ref}</a>`:'-'}</div></div>
+          <div><div class="meta-item-label">Source</div><div class="meta-item-value">${t.source_ref?`<a class="meta-link" href="#source/${t.source_ref}">#${t.source_ref}</a>`:'-'}</div></div>
+          <div><div class="meta-item-label">Depends On</div><div class="meta-item-value">${deps||'-'}</div></div>
+        </div>
+        ${t.message?`<div class="section-card"><div class="section-title">Message</div><div class="section-body">${t.message}</div></div>`:''}
+        ${t.ai_notes?`<div class="section-card"><div class="section-title">AI Notes</div><div class="section-body">${t.ai_notes}</div></div>`:''}
+      `;
+    }catch(e){
+      content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+    }
+  }else if(view==='project'){
+    content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading project #${id}...</div>`;
+    try{
+      const p = await fetchDetail('projects',id);
+      const sc = STATUS_COLORS[p.status] || '#6b7280';
+      content.innerHTML = `
+        <div class="detail-header">
+          <div class="detail-back" onclick="history.back()">← 返回</div>
+        </div>
+        <div class="detail-title" style="margin-bottom:.4rem">${p.name||'(untitled)'}</div>
+        <div style="margin-bottom:.6rem;display:flex;gap:.4rem;align-items:center">
+          ${badgeHtml(p.status, sc)}
+          ${p.domain?`<span class="badge">${p.domain}</span>`:''}
+          ${p.priority?`<span class="badge">Priority ${p.priority}</span>`:''}
+          ${p.output_type?`<span class="badge">${p.output_type}</span>`:''}
+        </div>
+        <div class="meta-grid">
+          <div><div class="meta-item-label">Deadline</div><div class="meta-item-value">${p.deadline||'-'}</div></div>
+          <div><div class="meta-item-label">Created</div><div class="meta-item-value">${formatDate(p.created_at)}</div></div>
+          <div><div class="meta-item-label">Updated</div><div class="meta-item-value">${formatDate(p.updated_at)}</div></div>
+        </div>
+        ${p.research_questions?`<div class="section-card"><div class="section-title">研究问题</div><div class="section-body">${p.research_questions}</div></div>`:''}
+        ${p.scope?`<div class="section-card"><div class="section-title">Scope</div><div class="section-body">${p.scope}</div></div>`:''}
+        ${p.ai_notes?`<div class="section-card"><div class="section-title">AI Notes</div><div class="section-body">${p.ai_notes}</div></div>`:''}
+        <div class="section-card">
+          <div class="section-title">关联资源</div>
+          <div class="section-body">
+            <a class="meta-link" href="#sources">查看相关素材</a> ·
+            <a class="meta-link" href="#tasks">查看相关任务</a> ·
+            <a class="meta-link" href="#outputs">查看相关产出</a>
+          </div>
+        </div>
+      `;
+    }catch(e){
+      content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
+    }
+  }
+}
+
+function route(){
+  let hash = location.hash.slice(1);
+  if(!hash){
+    location.hash = 'sources';
+    return;
+  }
+  const [view,id] = hash.split('/');
+  if(id){
+    renderDetail(view,id);
+  }else{
+    renderList(view);
+  }
+}
+
+document.querySelectorAll('.nav-item').forEach(el=>{
+  el.addEventListener('click',()=>{
+    const v = el.dataset.view;
+    location.hash = v;
+  });
+});
+
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
+
