@@ -42,16 +42,25 @@ class DiffractionAgent(AgentBase):
             await self.db.update_task(task.id, ai_notes="无可用的知识卡片")
             return events
 
-        # Build card context
+        # Build card context with Card IDs for fact anchoring
         card_text = ""
         for c in cards:
             card_text += (
-                f"## {c.concept} ({c.type})\n"
+                f"## [Card #{c.id}] {c.concept} ({c.type})\n"
                 f"定义: {c.definition}\n"
                 f"解释: {c.explanation}\n"
                 f"要点: {c.key_points}\n"
                 f"示例: {c.example}\n\n"
             )
+
+        # Append source references for additional context
+        sources = []
+        if task.project_ref:
+            sources = list(await self.db.list_sources(project_ref=task.project_ref))
+        if sources:
+            card_text += "---\n## 原始素材参考\n"
+            for s in sources:
+                card_text += f"- Source #{s.id}: {s.title} ({s.url})\n"
 
         output_type = project.output_type if project else "综述"
         project_name = project.name if project else task.name
@@ -72,6 +81,7 @@ class DiffractionAgent(AgentBase):
         output_data = self._parse_output(response.content, task.project_ref, output_type)
 
         if output_data:
+            gap_report = output_data.pop("_gap_report", "")
             created = await self.db.create_output(**output_data)
             await self.activity_logger.log(
                 actor=self.agent_name,
@@ -87,6 +97,26 @@ class DiffractionAgent(AgentBase):
                 task.id,
                 message=f"已产出文稿: {output_data['name']}",
             )
+
+            # Quality feedback loop: create supplemental collection task if gaps found
+            is_supplement = "补充采集" in (task.name or "")
+            if gap_report and gap_report.strip() != "无" and not is_supplement:
+                await self.db.create_task(
+                    name=f"补充采集 · {project_name}",
+                    type="采集",
+                    assigned_agent="focus",
+                    priority=task.priority,
+                    message=f"根据文稿产出的缺口报告进行补充采集：\n{gap_report}",
+                    project_ref=task.project_ref,
+                    status="Todo",
+                )
+                await self.activity_logger.log(
+                    actor=self.agent_name,
+                    action_type="Create",
+                    target_db="Tasks",
+                    description=f"创建补充采集任务: {project_name}",
+                )
+                self.logger.info("Created supplemental collection task for project %s", project_name)
         else:
             await self.db.update_task(
                 task.id,
@@ -146,6 +176,11 @@ class DiffractionAgent(AgentBase):
         if not word_count and body:
             word_count = len(body)
 
+        ai_notes = raw.get("ai_notes", "")
+        gap_report = raw.get("gap_report", "")
+        if gap_report and gap_report.strip() != "无":
+            ai_notes = f"{ai_notes}\n\n【缺口报告】\n{gap_report}".strip()
+
         return {
             "name": raw.get("title", "未命名文稿"),
             "type": output_type,
@@ -154,6 +189,7 @@ class DiffractionAgent(AgentBase):
             "assigned_agent": "diffraction",
             "word_count": word_count,
             "content": body,
-            "ai_notes": raw.get("ai_notes", ""),
+            "ai_notes": ai_notes,
             "review_needed": True,
+            "_gap_report": gap_report,
         }

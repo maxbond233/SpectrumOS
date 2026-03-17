@@ -12,7 +12,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git remote:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(find /Users/liangxian/project/SpectrumOS -name dashboard.html -o -name *.html)",
+      "Bash(grep -r \"UploadFile\\\\|File\\\\|multipart\" /Users/liangxian/project/SpectrumOS/src/spectrum --include=*.py)"
     ]
   }
 }

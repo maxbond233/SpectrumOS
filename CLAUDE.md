@@ -20,13 +20,17 @@ SQLite-backed multi-agent knowledge pipeline. 4 agents process research projects
 
 **Data flow:** `main.py` initializes everything — DB engine, LLM client, agents, scheduler, FastAPI — then runs scheduler + API concurrently via `asyncio.gather`.
 
-**Agent tick lifecycle** (`agents/base.py`): Scheduler calls `agent.tick()` every 30s. Base tick queries Agent Board for `status=Todo` tasks assigned to this agent, transitions each through `Todo → Doing → process_task() → Done`. Errors set `Waiting + review_needed=True`. Prism overrides `tick()` to also scan for new projects and check pipeline progress.
+**Agent tick lifecycle** (`agents/base.py`): Scheduler calls `agent.tick()` every 30s. Base tick queries Agent Board for `status=Todo` tasks assigned to this agent, transitions each through `Todo → Doing → process_task() → Done`. Errors increment `retry_count`; after 3 failures task is marked `Failed` with `review_needed=True`. Prism overrides `tick()` to also scan for new projects and check pipeline progress.
 
-**Dependency chain:** Prism decomposes projects into chained tasks (采集→分析→产出). Downstream tasks start as `Waiting` with `depends_on` referencing upstream task IDs. Scheduler calls `db.resolve_dependencies()` each tick to unlock `Waiting → Todo` when all deps are `Done`.
+**Dependency chain:** Prism decomposes projects into chained tasks (采集→分析→产出). Downstream tasks start as `Waiting` with `depends_on` referencing comma-separated upstream task IDs. Scheduler calls `db.resolve_dependencies()` each tick to unlock `Waiting → Todo` when all deps are `Done`.
 
-**LLM dual protocol** (`llm/provider.py`): Abstract `LLMProvider` with `AnthropicProvider` (Claude) and `OpenAICompatProvider` (DeepSeek/Qwen). `LLMClient` routes to per-agent providers based on `config/settings.yaml`. Focus agent uses `complete_with_tool_loop()` for multi-round web search.
+**LLM protocol** (`llm/provider.py`): Abstract `LLMProvider` with `OpenAICompatProvider` implementation (handles Claude, DeepSeek, Qwen via OpenAI-compatible endpoints). `LLMClient` routes to per-agent providers based on `config/settings.yaml` — supports per-agent model/key/temperature overrides.
 
-**Config** (`config.py`): `load_settings()` merges `config/settings.yaml` (structured config) with `.env` (secrets) via pydantic-settings.
+**Config** (`config.py`): `load_settings()` merges `config/settings.yaml` (structured config) with `.env` (secrets) via pydantic-settings. Includes backward-compat migration for old search config format.
+
+**Multi-provider search** (`tools/`): `WebSearchTool` coordinates 4 search providers (Tavily, SerpAPI, Semantic Scholar, Perplexity) — concurrent execution, URL dedup with score boosting. Content extraction via Jina Reader API with regex fallback. Configured in `settings.yaml` under `search.providers`.
+
+**Focus agent 4-stage pipeline** (`agents/focus.py`): Code-driven, not LLM tool-loop. `_plan_search()` (LLM plans keywords) → `_execute_search()` (code runs multi-provider search + page extraction) → `_evaluate_results()` (LLM scores coverage, suggests supplements) → `_synthesize_sources()` (LLM produces structured records). Iterates up to `max_search_rounds` if coverage insufficient.
 
 ## Key Conventions
 
@@ -46,3 +50,10 @@ SQLite-backed multi-agent knowledge pipeline. 4 agents process research projects
 2. Implement `async process_task(self, task: AgentTask) -> list[str]`
 3. Register in `main.py:build_agents()` factory dict
 4. Add to `config/settings.yaml` under `agents.enabled` and optionally `llm.agents`
+
+## Adding a New Search Provider
+
+1. Subclass `SearchProvider` in `tools/search_providers.py`, set `name`
+2. Implement `async search(self, query, max_results) -> list[SearchResult]`
+3. Add to `_PROVIDER_MAP` in the same file
+4. Add config entry in `settings.yaml` under `search.providers`

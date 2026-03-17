@@ -9,7 +9,7 @@ llm:
     model: "claude-sonnet-4-5-20250929"
     api_key_env: "CLAUDE_API_KEY"
     base_url_env: "CLAUDE_BASE_URL"
-    max_tokens: 4096
+    max_tokens: 8192
     temperature: 0.3
 
   agents:
@@ -18,8 +18,11 @@ llm:
       model: "claude-sonnet-4-5-20250929"
       api_key_env: "CLAUDE_API_KEY"
       base_url_env: "CLAUDE_BASE_URL"
-    dispersion: {}
-    diffraction: {}
+      max_tokens: 8192
+    dispersion:
+      max_tokens: 8192
+    diffraction:
+      max_tokens: 12288
 
 search:
   providers:

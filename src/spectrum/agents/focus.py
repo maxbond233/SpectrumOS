@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date
 
 from spectrum.agents.base import AgentBase
 from spectrum.db.models import AgentTask
@@ -65,6 +66,11 @@ class FocusAgent(AgentBase):
 
         keywords = plan.get("keywords", [])
         academic_keywords = plan.get("academic_keywords", [])
+
+        # Freshness: append current year to keywords for time-sensitive topics
+        if plan.get("freshness") == "recent":
+            year = str(date.today().year)
+            keywords = [f"{kw} {year}" for kw in keywords]
 
         for round_num in range(max_rounds):
             self.logger.info("Search round %d/%d", round_num + 1, max_rounds)
@@ -133,7 +139,10 @@ class FocusAgent(AgentBase):
 
     async def _plan_search(self, context: str) -> dict:
         """LLM generates search keywords and strategy."""
-        prompt = FOCUS_PLANNING_PROMPT.format(context=context)
+        prompt = FOCUS_PLANNING_PROMPT.format(
+            context=context,
+            current_date=date.today().isoformat(),
+        )
         response = await self.llm.complete(
             agent_name=self.agent_name,
             system="你是搜索规划专家。只输出 JSON，不要输出其他内容。",
@@ -177,7 +186,7 @@ class FocusAgent(AgentBase):
         for url in urls_to_fetch[:8]:
             try:
                 page = await self.search_tool.fetch_page(url)
-                new_pages[url] = page.text[:15000]
+                new_pages[url] = page.text[:30000]
             except Exception as e:
                 self.logger.debug("Failed to fetch %s: %s", url, e)
 
@@ -244,10 +253,10 @@ class FocusAgent(AgentBase):
             entry += f"Snippet: {r.snippet}\n"
             # Attach full page content if available
             if r.url in pages:
-                entry += f"\n### 全文内容（截取）\n{pages[r.url][:5000]}\n"
+                entry += f"\n### 全文内容（截取）\n{pages[r.url][:10000]}\n"
             materials.append(entry)
 
-        materials_text = "\n---\n".join(materials[:15])  # cap to avoid token overflow
+        materials_text = "\n---\n".join(materials[:20])  # cap to avoid token overflow
 
         response = await self.llm.complete(
             agent_name=self.agent_name,
@@ -312,7 +321,7 @@ class FocusAgent(AgentBase):
                     "status": "Collected",
                     "url": "",
                     "authors": "",
-                    "extracted_summary": content[:2000],
+                    "extracted_summary": content[:5000],
                     "key_questions": "",
                     "why_it_matters": "",
                     "project_ref": project_ref,
