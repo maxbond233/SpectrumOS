@@ -42,6 +42,7 @@ class FocusAgent(AgentBase):
 
         # Build context
         project = None
+        brief_checklist = ""
         if task.project_ref:
             project = await self.db.get_project(task.project_ref)
 
@@ -52,6 +53,8 @@ class FocusAgent(AgentBase):
                 f"领域: {project.domain}\n"
                 f"研究问题: {project.research_questions}\n"
             )
+            # Extract brief checklist for evaluate stage
+            brief_checklist = self._build_brief_checklist(project)
 
         # Stage 1 — Plan
         plan = await self._plan_search(context)
@@ -84,7 +87,7 @@ class FocusAgent(AgentBase):
 
             # Evaluate (skip on last round)
             if round_num < max_rounds - 1:
-                evaluation = await self._evaluate_results(context, all_results, all_pages)
+                evaluation = await self._evaluate_results(context, all_results, all_pages, brief_checklist)
                 if evaluation.get("sufficient", False):
                     self.logger.info("Coverage sufficient (score=%s), stopping search",
                                      evaluation.get("coverage_score"))
@@ -199,8 +202,9 @@ class FocusAgent(AgentBase):
         context: str,
         results: list[SearchResult],
         pages: dict[str, str],
+        brief_checklist: str = "",
     ) -> dict:
-        """LLM evaluates coverage and suggests supplemental keywords."""
+        """LLM evaluates coverage against brief checklist."""
         # Build summary of what we have
         sources_summary = []
         for r in results[:20]:  # cap to avoid token overflow
@@ -216,6 +220,7 @@ class FocusAgent(AgentBase):
 
         prompt = FOCUS_EVALUATION_PROMPT.format(
             context=context,
+            brief_checklist=brief_checklist or "（未提供研究简报，请根据课题信息自行判断覆盖度）",
             sources_summary=summary_text,
         )
         response = await self.llm.complete(
@@ -304,6 +309,28 @@ class FocusAgent(AgentBase):
         if not isinstance(result, expect_type):
             raise TypeError(f"Expected {expect_type}, got {type(result)}")
         return result
+
+    # ── Brief checklist builder ───────────────────────────────────────────
+
+    @staticmethod
+    def _build_brief_checklist(project) -> str:
+        """Extract core_questions and subtopics from project's research_brief as a checklist."""
+        brief_str = getattr(project, "research_brief", "") or ""
+        if not brief_str:
+            return ""
+        try:
+            brief = json.loads(brief_str)
+        except (json.JSONDecodeError, TypeError):
+            return ""
+
+        lines = ["研究简报覆盖度清单（请逐项检查）："]
+        for i, q in enumerate(brief.get("core_questions", []), 1):
+            lines.append(f"  核心问题 {i}: {q}")
+        for st in brief.get("subtopics", []):
+            name = st.get("name", "")
+            importance = st.get("importance", "")
+            lines.append(f"  子话题: {name}（重要性: {importance}）")
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     def _parse_sources(self, content: str, project_ref: int | None) -> list[dict]:
         """Parse LLM response into source dicts."""

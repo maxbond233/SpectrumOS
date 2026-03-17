@@ -32,6 +32,9 @@ class ResearchProject(Base):
     deadline: Mapped[str] = mapped_column(String(50), default="")
     assigned_agent: Mapped[str] = mapped_column(String(50), default="")
     ai_notes: Mapped[str] = mapped_column(Text, default="")
+    research_brief: Mapped[str] = mapped_column(Text, default="")  # JSON, 棱镜生成的研究简报
+    review_round: Mapped[int] = mapped_column(Integer, default=0)  # 完成审核轮次，最大 1
+    completion_review: Mapped[str] = mapped_column(Text, default="")  # JSON, 审核结果
     review_needed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
