@@ -63,6 +63,7 @@ async def run() -> None:
         "DEEPSEEK_API_KEY": settings.deepseek_api_key,
         "DEEPSEEK_BASE_URL": settings.deepseek_base_url,
         "TAVILY_API_KEY": settings.tavily_api_key,
+        "SERPAPI_API_KEY": settings.serpapi_api_key,
     }
     for key, val in _env_exports.items():
         if val and not os.environ.get(key):

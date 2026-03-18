@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_base_url: str = ""
     tavily_api_key: str = ""
+    serpapi_api_key: str = ""
 
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
