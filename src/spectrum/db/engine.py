@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from spectrum.config import DatabaseConfig
+
+logger = logging.getLogger(__name__)
 
 _engine = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -72,8 +76,6 @@ async def _migrate_schema() -> None:
         "CREATE TABLE IF NOT EXISTS card_links (id INTEGER PRIMARY KEY AUTOINCREMENT, from_id INTEGER NOT NULL, to_id INTEGER NOT NULL, relation TEXT DEFAULT '相关', source TEXT DEFAULT 'ai', note TEXT, created_at TEXT DEFAULT (datetime('now')))",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_card_links_unique ON card_links(from_id, to_id, relation)",
         "CREATE INDEX IF NOT EXISTS idx_card_links_to ON card_links(to_id)",
-        # FTS5
-        "CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5(entity_type, entity_id UNINDEXED, title, body, domain, tokenize='unicode61')",
         # Source URL dedup index
         "CREATE INDEX IF NOT EXISTS idx_sources_url_hash ON sources(url_hash)",
     ]
@@ -83,6 +85,28 @@ async def _migrate_schema() -> None:
                 await conn.execute(text(sql))
             except Exception:
                 pass
+
+    # FTS5 virtual table — separate block with explicit error handling
+    # FTS5 can fail if the table exists but is corrupted; drop and recreate in that case
+    async with engine.begin() as conn:
+        try:
+            await conn.execute(text(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS fts_index USING fts5("
+                "entity_type, entity_id UNINDEXED, title, body, domain, "
+                "tokenize='unicode61')"
+            ))
+        except Exception as e:
+            logger.warning("FTS5 table creation failed (%s), attempting drop+recreate", e)
+            try:
+                await conn.execute(text("DROP TABLE IF EXISTS fts_index"))
+                await conn.execute(text(
+                    "CREATE VIRTUAL TABLE fts_index USING fts5("
+                    "entity_type, entity_id UNINDEXED, title, body, domain, "
+                    "tokenize='unicode61')"
+                ))
+                logger.info("FTS5 table recreated successfully")
+            except Exception as e2:
+                logger.error("FTS5 table recreation also failed: %s", e2)
 
 
 async def close_engine() -> None:

@@ -19,6 +19,13 @@ async def rebuild_fts_index() -> int:
     session_factory = get_session_factory()
     total = 0
     async with session_factory() as session:
+        # Check if FTS table exists
+        try:
+            await session.execute(text("SELECT COUNT(*) FROM fts_index"))
+        except Exception:
+            logger.warning("FTS table not available, skipping rebuild")
+            return 0
+
         # Clear existing index
         await session.execute(text("DELETE FROM fts_index"))
 
@@ -66,18 +73,21 @@ async def upsert_fts_entry(
 ) -> None:
     """Insert or replace a single FTS entry."""
     session_factory = get_session_factory()
-    async with session_factory() as session:
-        # Delete existing entry for this entity
-        await session.execute(
-            text("DELETE FROM fts_index WHERE entity_type = :t AND entity_id = :id"),
-            {"t": entity_type, "id": str(entity_id)},
-        )
-        # Insert new
-        await session.execute(
-            text("INSERT INTO fts_index(entity_type, entity_id, title, body, domain) VALUES (:t, :id, :title, :body, :domain)"),
-            {"t": entity_type, "id": str(entity_id), "title": title, "body": body, "domain": domain},
-        )
-        await session.commit()
+    try:
+        async with session_factory() as session:
+            # Delete existing entry for this entity
+            await session.execute(
+                text("DELETE FROM fts_index WHERE entity_type = :t AND entity_id = :id"),
+                {"t": entity_type, "id": str(entity_id)},
+            )
+            # Insert new
+            await session.execute(
+                text("INSERT INTO fts_index(entity_type, entity_id, title, body, domain) VALUES (:t, :id, :title, :body, :domain)"),
+                {"t": entity_type, "id": str(entity_id), "title": title, "body": body, "domain": domain},
+            )
+            await session.commit()
+    except Exception:
+        logger.warning("FTS upsert failed for %s:%d (table may not exist)", entity_type, entity_id)
 
 
 async def search_fts(
@@ -85,46 +95,54 @@ async def search_fts(
 ) -> list[dict]:
     """Search FTS index. Returns list of {entity_type, entity_id, title, snippet, rank}."""
     session_factory = get_session_factory()
-    async with session_factory() as session:
-        if entity_type:
-            sql = text("""
-                SELECT entity_type, entity_id, title,
-                       snippet(fts_index, 3, '<mark>', '</mark>', '...', 32) as snippet,
-                       rank
-                FROM fts_index
-                WHERE fts_index MATCH :query AND entity_type = :etype
-                ORDER BY rank
-                LIMIT :limit
-            """)
-            result = await session.execute(sql, {"query": query, "etype": entity_type, "limit": limit})
-        else:
-            sql = text("""
-                SELECT entity_type, entity_id, title,
-                       snippet(fts_index, 3, '<mark>', '</mark>', '...', 32) as snippet,
-                       rank
-                FROM fts_index
-                WHERE fts_index MATCH :query
-                ORDER BY rank
-                LIMIT :limit
-            """)
-            result = await session.execute(sql, {"query": query, "limit": limit})
+    try:
+        async with session_factory() as session:
+            if entity_type:
+                sql = text("""
+                    SELECT entity_type, entity_id, title,
+                           snippet(fts_index, 3, '<mark>', '</mark>', '...', 32) as snippet,
+                           rank
+                    FROM fts_index
+                    WHERE fts_index MATCH :query AND entity_type = :etype
+                    ORDER BY rank
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {"query": query, "etype": entity_type, "limit": limit})
+            else:
+                sql = text("""
+                    SELECT entity_type, entity_id, title,
+                           snippet(fts_index, 3, '<mark>', '</mark>', '...', 32) as snippet,
+                           rank
+                    FROM fts_index
+                    WHERE fts_index MATCH :query
+                    ORDER BY rank
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {"query": query, "limit": limit})
 
-        return [
-            {
-                "entity_type": row[0],
-                "entity_id": int(row[1]),
-                "title": row[2],
-                "snippet": row[3],
-                "rank": row[4],
-            }
-            for row in result.fetchall()
-        ]
+            return [
+                {
+                    "entity_type": row[0],
+                    "entity_id": int(row[1]),
+                    "title": row[2],
+                    "snippet": row[3],
+                    "rank": row[4],
+                }
+                for row in result.fetchall()
+            ]
+    except Exception:
+        logger.warning("FTS search failed (table may not exist)")
+        return []
 
 
 async def fts_is_empty() -> bool:
-    """Check if the FTS index has any entries."""
+    """Check if the FTS index has any entries. Returns True if empty or table missing."""
     session_factory = get_session_factory()
-    async with session_factory() as session:
-        result = await session.execute(text("SELECT COUNT(*) FROM fts_index"))
-        count = result.scalar_one()
-        return count == 0
+    try:
+        async with session_factory() as session:
+            result = await session.execute(text("SELECT COUNT(*) FROM fts_index"))
+            count = result.scalar_one()
+            return count == 0
+    except Exception:
+        logger.warning("FTS table not available")
+        return True

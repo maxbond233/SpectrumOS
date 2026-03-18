@@ -365,12 +365,22 @@ class PrismAgent(AgentBase):
                 system="你是研究规划专家。请严格按要求输出 JSON。",
                 messages=[{"role": "user", "content": prompt}],
             )
+            if not response.content or not response.content.strip():
+                self.logger.warning(
+                    "Empty LLM response for brief generation, project %s", project.id
+                )
+                return ""
             # Validate it's parseable JSON
             parsed = self._parse_json(response.content)
             if parsed and "core_questions" in parsed:
                 return json.dumps(parsed, ensure_ascii=False)
+            else:
+                self.logger.warning(
+                    "Brief JSON missing 'core_questions' for project %s. Raw: %.200s",
+                    project.id, response.content,
+                )
         except Exception:
-            self.logger.warning("Failed to generate brief for project %s", project.id)
+            self.logger.exception("Failed to generate brief for project %s", project.id)
         return ""
 
     def _parse_brief(self, brief_str: str) -> dict | None:
