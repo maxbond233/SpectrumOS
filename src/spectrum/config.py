@@ -147,10 +147,33 @@ def _migrate_search_config(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_settings() -> Settings:
-    """Load settings from YAML + env vars."""
+    """Load settings from YAML + env vars.
+
+    Also exports .env values to os.environ so that downstream code
+    (e.g. OpenAI SDK) can read them via os.environ.get().
+    """
+    _load_dotenv()
     yaml_data = _load_yaml(_CONFIG_DIR / "settings.yaml")
     yaml_data = _migrate_search_config(yaml_data)
     return Settings(**yaml_data)
+
+
+def _load_dotenv() -> None:
+    """Read .env file and inject into os.environ (skip existing keys)."""
+    import os
+    env_path = _ROOT / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and not os.environ.get(key):
+                os.environ[key] = value
 
 
 def setup_logging() -> None:
