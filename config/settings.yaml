@@ -18,9 +18,9 @@ llm:
       model: "claude-sonnet-4-5-20250929"
       api_key_env: "CLAUDE_API_KEY"
       base_url_env: "CLAUDE_BASE_URL"
-      max_tokens: 8192
+      max_tokens: 12288
     dispersion:
-      max_tokens: 8192
+      max_tokens: 12288
     diffraction:
       max_tokens: 12288
 

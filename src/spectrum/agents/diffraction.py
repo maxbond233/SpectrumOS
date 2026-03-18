@@ -87,7 +87,7 @@ class DiffractionAgent(AgentBase):
         # ── Stage 2: Section-by-section expansion ─────────────────────
         self.logger.info("Stage 2: Expanding sections for %s", project_name)
         draft_content = await self._expand_sections(
-            project_name, output_type, task.message, card_text, outline
+            project_name, output_type, task.message, card_text, outline, cards=cards
         )
 
         # ── Stage 3: Critical review ─────────────────────────────────
@@ -277,11 +277,12 @@ class DiffractionAgent(AgentBase):
         task_message: str,
         card_text: str,
         outline: dict | None,
+        cards: list | None = None,
     ) -> str:
         """Expand outline into full document. Falls back to single-pass if no outline."""
         if outline and outline.get("sections"):
             return await self._expand_with_outline(
-                project_name, output_type, task_message, card_text, outline
+                project_name, output_type, task_message, card_text, outline, cards=cards
             )
         # Fallback: single-pass generation (original behavior)
         return await self._single_pass_generate(
@@ -295,6 +296,7 @@ class DiffractionAgent(AgentBase):
         task_message: str,
         card_text: str,
         outline: dict,
+        cards: list | None = None,
     ) -> str:
         """Expand each section of the outline sequentially."""
         sections = outline.get("sections", [])
@@ -302,11 +304,24 @@ class DiffractionAgent(AgentBase):
         title = outline.get("title", project_name)
 
         all_sections: list[str] = []
+        section_summaries: list[str] = []  # concise summaries for dedup context
         for i, section in enumerate(sections):
             heading = section.get("heading", f"第{i+1}节")
             purpose = section.get("purpose", "")
             card_ids = section.get("card_ids", [])
             logic_flow = section.get("logic_flow", "")
+            depth = section.get("depth", "详述")
+            dedup_note = section.get("dedup_note", "")
+
+            # Filter cards relevant to this section — use full text for relevant subset
+            if card_ids and cards:
+                id_set = {str(cid) for cid in card_ids}
+                relevant = [c for c in cards if str(c.id) in id_set]
+                relevant_cards = self._build_card_text_full(relevant) if relevant else card_text
+            elif card_ids:
+                relevant_cards = self._filter_card_text(card_text, card_ids)
+            else:
+                relevant_cards = card_text
 
             section_prompt = (
                 f"你正在撰写「{title}」（{output_type}）的第 {i+1}/{len(sections)} 节。\n\n"
@@ -314,25 +329,53 @@ class DiffractionAgent(AgentBase):
                 f"本节标题: {heading}\n"
                 f"本节目的: {purpose}\n"
                 f"逻辑线索: {logic_flow}\n"
+                f"展开深度: {depth}\n"
                 f"使用的卡片 ID: {card_ids}\n\n"
             )
+
+            # Dedup instructions
+            if dedup_note:
+                section_prompt += f"⚠️ 去重边界: {dedup_note}\n\n"
+
+            # Pass summaries of completed sections for dedup awareness
+            if section_summaries:
+                section_prompt += "已完成章节摘要（避免重复这些内容）:\n"
+                for j, summary in enumerate(section_summaries):
+                    section_prompt += f"  第{j+1}节: {summary}\n"
+                section_prompt += "\n"
+
+            #衔接上下文
             if all_sections:
-                prev_summary = all_sections[-1][:500]
-                section_prompt += f"上一节末尾内容（用于衔接）:\n{prev_summary}\n\n"
+                prev_ending = all_sections[-1][-200:]
+                section_prompt += f"上一节末尾内容（用于衔接）:\n{prev_ending}\n\n"
 
             section_prompt += (
-                f"可用知识卡片:\n{card_text}\n\n"
+                f"可用知识卡片:\n{relevant_cards}\n\n"
                 "请撰写本节内容。使用 Markdown 格式。"
                 "每个事实性陈述必须标注 [Card #ID] 来源。"
-                "直接输出本节 Markdown 内容，不要包含 JSON 或其他格式。"
+                "直接输出本节 Markdown 内容，不要包含 JSON 或其他格式。\n"
             )
+
+            if depth == "概述":
+                section_prompt += (
+                    "⚠️ 本节为概述深度：只做简要提及和全景导览，"
+                    "不要展开完整公式推导或详细技术分析。"
+                    "详细内容留给后续章节。\n"
+                )
 
             response = await self.llm.complete(
                 agent_name=self.agent_name,
                 system=DIFFRACTION_SYSTEM,
                 messages=[{"role": "user", "content": section_prompt}],
             )
-            all_sections.append(response.content or "")
+            section_content = response.content or ""
+            all_sections.append(section_content)
+
+            # Generate a concise summary for dedup context (first 120 chars + key topics)
+            summary = section_content[:120].replace("\n", " ").strip()
+            if len(section_content) > 120:
+                summary += "..."
+            section_summaries.append(f"[{heading}] {summary}")
 
         return f"# {title}\n\n" + "\n\n".join(all_sections)
 
@@ -402,6 +445,29 @@ class DiffractionAgent(AgentBase):
         )
         return response.content or draft
 
+    # ── Card filtering ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _filter_card_text(card_text: str, card_ids: list) -> str:
+        """Extract only the cards matching the given IDs from the full card text.
+
+        Card text is formatted as sections starting with ``### Card #<id>``.
+        If no matching cards are found, returns the full text as fallback.
+        """
+        if not card_ids:
+            return card_text
+
+        id_set = {str(cid) for cid in card_ids}
+        blocks = re.split(r"(?=### Card #)", card_text)
+        matched = []
+        for block in blocks:
+            for cid in id_set:
+                if f"### Card #{cid}" in block:
+                    matched.append(block.strip())
+                    break
+
+        return "\n\n".join(matched) if matched else card_text
+
     # ── Output building ──────────────────────────────────────────────────
 
     def _build_output(
@@ -466,7 +532,19 @@ class DiffractionAgent(AgentBase):
         card_text = ""
         for c in cards:
             card_text += (
-                f"## [Card #{c.id}] {c.concept} ({c.type})\n"
+                f"### Card #{c.id}: {c.concept} ({c.type})\n"
+                f"定义: {c.definition}\n"
+                f"要点: {c.key_points}\n\n"
+            )
+        return card_text
+
+    @staticmethod
+    def _build_card_text_full(cards) -> str:
+        """Build full card context including explanation (for single-section use)."""
+        card_text = ""
+        for c in cards:
+            card_text += (
+                f"### Card #{c.id}: {c.concept} ({c.type})\n"
                 f"定义: {c.definition}\n"
                 f"解释: {c.explanation}\n"
                 f"要点: {c.key_points}\n"

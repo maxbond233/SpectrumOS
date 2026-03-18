@@ -4,8 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>光谱 OS · Explorer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -1037,7 +1041,8 @@ async function renderDetail(view,id){
           <div class="section-title" style="margin-bottom:.2rem">导出 / 预览</div>
           <div class="section-body" style="white-space:normal">
             <a href="/api/outputs/${id}/markdown" class="meta-link" style="margin-right:.8rem">📥 Download .md</a>
-            <a href="/api/outputs/${id}/html" target="_blank" class="meta-link">📄 View HTML</a>
+            <a href="/api/outputs/${id}/html" target="_blank" class="meta-link" style="margin-right:.8rem">📄 View HTML</a>
+            <a href="/api/outputs/${id}/pdf" class="meta-link">📕 Download PDF</a>
           </div>
         </div>
         <div class="detail-title" style="margin-bottom:.4rem">${o.name||'(untitled)'}</div>
@@ -1057,7 +1062,29 @@ async function renderDetail(view,id){
       `;
       if(contentText && window.marked){
         const contentEl = document.getElementById('output-content');
-        if(contentEl) contentEl.innerHTML = marked.parse(contentText);
+        if(contentEl){
+          // Protect LaTeX from marked.js: extract formulas, parse markdown, restore
+          const mathBlocks = [];
+          let protected = contentText
+            .replace(/\$\$([\s\S]+?)\$\$/g, (m) => { mathBlocks.push(m); return `%%MATH${mathBlocks.length-1}%%`; })
+            .replace(/\$([^\n$]+?)\$/g, (m) => { mathBlocks.push(m); return `%%MATH${mathBlocks.length-1}%%`; })
+            .replace(/\\\[([\s\S]+?)\\\]/g, (m) => { mathBlocks.push(m); return `%%MATH${mathBlocks.length-1}%%`; })
+            .replace(/\\\((.+?)\\\)/g, (m) => { mathBlocks.push(m); return `%%MATH${mathBlocks.length-1}%%`; });
+          let html = marked.parse(protected);
+          html = html.replace(/%%MATH(\d+)%%/g, (_, i) => mathBlocks[parseInt(i)]);
+          contentEl.innerHTML = html;
+          if(window.renderMathInElement){
+            renderMathInElement(contentEl, {
+              delimiters: [
+                {left: "$$", right: "$$", display: true},
+                {left: "$", right: "$", display: false},
+                {left: "\\(", right: "\\)", display: false},
+                {left: "\\[", right: "\\]", display: true}
+              ],
+              throwOnError: false
+            });
+          }
+        }
       }
     }catch(e){
       content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;

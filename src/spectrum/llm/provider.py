@@ -114,7 +114,7 @@ class OpenAICompatProvider(LLMProvider):
                     id=tc.id,
                 ))
 
-        return LLMResponse(
+        response = LLMResponse(
             content=content,
             tool_calls=tool_calls,
             usage={
@@ -123,6 +123,16 @@ class OpenAICompatProvider(LLMProvider):
             },
             stop_reason=choice.finish_reason or "",
         )
+
+        if choice.finish_reason == "length":
+            output_tokens = resp.usage.completion_tokens if resp.usage else 0
+            logger.warning(
+                "LLM output truncated (finish_reason=length, "
+                "model=%s, max_tokens=%d, output_tokens=%d, content_len=%d)",
+                self._model, max_tokens, output_tokens, len(content),
+            )
+
+        return response
 
     async def complete_with_tool_loop(
         self,

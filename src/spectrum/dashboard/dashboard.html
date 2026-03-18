@@ -81,13 +81,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 
 /* Database cards */
 .db-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.db-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:1.2rem 1.4rem;cursor:pointer;transition:all .25s;text-decoration:none;color:inherit;display:block}
+.db-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:1.2rem 1.4rem;cursor:pointer;transition:all .25s;text-decoration:none;color:inherit;display:block;overflow:hidden}
 .db-card:hover{background:var(--bg3);border-color:var(--bd2);transform:translateY(-1px)}
 .db-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem}
 .db-icon{font-size:1.1rem}
 .db-name{font-size:.88rem;font-weight:500}
 .db-count{margin-left:auto;font-size:.72rem;font-family:var(--mono);font-weight:500}
-.db-breakdown{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:.6rem}
+.db-breakdown{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:.6rem;max-height:4.5rem;overflow:hidden}
 .db-chip{font-size:.62rem;padding:3px 8px;border-radius:10px;font-family:var(--mono);letter-spacing:.3px;border:1px solid}
 .db-bar{display:flex;gap:2px;height:6px;border-radius:3px;overflow:hidden;margin-bottom:.6rem}
 .db-bar-seg{height:100%;border-radius:3px;transition:width .5s ease;min-width:3px}
@@ -218,6 +218,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
       <span class="tag">Light Path</span>
     </div>
     <div class="agent-grid" id="agent-grid"></div>
+  </div>
+
+  <!-- Token Usage -->
+  <div class="section" style="animation-delay:.12s">
+    <div class="section-header">
+      <h2>📊 Token 用量</h2>
+      <span class="tag" id="token-total">—</span>
+    </div>
+    <div id="token-usage" style="display:flex;gap:10px;flex-wrap:wrap"></div>
   </div>
 
   <!-- Databases -->
@@ -469,6 +478,42 @@ function populateProjectDropdown(data) {
   sel.innerHTML = '<option value=\"\">无</option>' + recent.map(p => `<option value=\"${p.id}\">${p.title || p.name || ('项目 #' + p.id)}</option>`).join('');
 }
 
+function fmtTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+const AGENT_COLORS = {prism:'#8b5cf6',focus:'#06b6d4',dispersion:'#f59e0b',diffraction:'#3b82f6'};
+const AGENT_EMOJI = {prism:'🔮',focus:'💠',dispersion:'🌈',diffraction:'🌊'};
+
+async function loadTokenUsage() {
+  try {
+    const resp = await fetch('/api/token-usage');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const t = data.total || {};
+    const totalTokens = (t.input || 0) + (t.output || 0);
+    document.getElementById('token-total').textContent =
+      fmtTokens(totalTokens) + ' tokens · ' + (t.calls || 0) + ' calls';
+    const container = document.getElementById('token-usage');
+    const agents = data.agents || {};
+    const entries = Object.entries(agents).sort((a,b) => (b[1].input+b[1].output) - (a[1].input+a[1].output));
+    container.innerHTML = entries.map(([name, u]) => {
+      const c = AGENT_COLORS[name] || '#6b7280';
+      const emoji = AGENT_EMOJI[name] || '🤖';
+      const total = (u.input||0) + (u.output||0);
+      return `<div style="flex:1;min-width:140px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:.6rem .8rem">
+        <div style="font-size:.85rem;margin-bottom:.3rem">${emoji} <span style="color:${c}">${name}</span></div>
+        <div style="font-size:1.1rem;font-weight:600">${fmtTokens(total)}</div>
+        <div style="font-size:.68rem;color:rgba(255,255,255,.4);margin-top:.15rem">
+          ↑${fmtTokens(u.input||0)} ↓${fmtTokens(u.output||0)} · ${u.calls||0} calls
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Token usage fetch failed:', e); }
+}
+
 async function loadData() {
   try {
     document.getElementById('update-time').innerHTML = '<span class="live-dot"></span>fetching...';
@@ -481,6 +526,7 @@ async function loadData() {
     renderDatabases(data);
     renderFlow(data);
     populateProjectDropdown(data);
+    loadTokenUsage();
 
     const ts = new Date(data.timestamp);
     document.getElementById('update-time').innerHTML =

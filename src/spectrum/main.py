@@ -86,7 +86,7 @@ async def run() -> None:
     # FastAPI — import here to avoid circular deps
     from spectrum.api.app import create_app
 
-    app = create_app(scheduler=scheduler, db=db, activity_logger=activity_logger)
+    app = create_app(scheduler=scheduler, db=db, activity_logger=activity_logger, llm_client=llm)
 
     # Run scheduler + API concurrently
     api_config = uvicorn.Config(

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spectrum-os"
-version = "0.3.1"
+version = "0.3.3"
 description = "光谱 OS — SQLite-backed multi-agent knowledge pipeline"
 requires-python = ">=3.11"
 dependencies = [
@@ -28,6 +28,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.7.0",
+]
+pdf = [
+    "weasyprint>=60",
 ]
 
 [project.scripts]

@@ -258,7 +258,10 @@ class FocusAgent(AgentBase):
         results: list[SearchResult],
         pages: dict[str, str],
     ) -> str:
-        """LLM synthesizes collected content into structured source records."""
+        """LLM synthesizes collected content into structured source records.
+
+        Processes materials in batches to avoid output truncation.
+        """
         # Build input: search results + extracted page content
         materials = []
         seen_urls: set[str] = set()
@@ -272,24 +275,48 @@ class FocusAgent(AgentBase):
             if r.year:
                 entry += f"Year: {r.year}\n"
             entry += f"Snippet: {r.snippet}\n"
-            # Attach full page content if available
+            # Attach full page content if available (cap to avoid token overflow)
             if r.url in pages:
-                entry += f"\n### 全文内容（截取）\n{pages[r.url][:10000]}\n"
+                entry += f"\n### 全文内容（截取）\n{pages[r.url][:6000]}\n"
             materials.append(entry)
 
-        materials_text = "\n---\n".join(materials[:20])  # cap to avoid token overflow
+        # Process one material at a time to avoid output truncation
+        batch_size = 1
+        all_json_parts: list[str] = []
+        for i in range(0, min(len(materials), 15), batch_size):
+            batch = materials[i : i + batch_size]
+            batch_text = "\n---\n".join(batch)
 
-        response = await self.llm.complete(
-            agent_name=self.agent_name,
-            system=FOCUS_SYSTEM,
-            messages=[{"role": "user", "content": (
-                f"{context}\n\n"
-                f"以下是已采集的 {len(materials)} 个素材的详细内容：\n\n"
-                f"{materials_text}\n\n"
-                "请为每个有价值的素材生成结构化记录（JSON 数组）。"
-            )}],
-        )
-        return response.content or ""
+            response = await self.llm.complete(
+                agent_name=self.agent_name,
+                system=FOCUS_SYSTEM,
+                messages=[{"role": "user", "content": (
+                    f"{context}\n\n"
+                    f"以下是第 {i + 1} 个素材（共 {min(len(materials), 15)} 个）的详细内容：\n\n"
+                    f"{batch_text}\n\n"
+                    "请为该素材生成结构化记录（JSON 数组，包含 1 个元素）。"
+                )}],
+            )
+            all_json_parts.append(response.content or "")
+
+        # Merge batch results into a single JSON array string
+        if len(all_json_parts) == 1:
+            return all_json_parts[0]
+
+        # Combine multiple JSON arrays into one
+        merged: list = []
+        for part in all_json_parts:
+            try:
+                parsed = extract_json_from_llm(part, expect_type=list)
+                merged.extend(parsed)
+            except (json.JSONDecodeError, TypeError):
+                # If a batch failed to parse, keep raw text for fallback
+                if not merged:
+                    return part
+                self.logger.warning("Failed to parse batch result, skipping")
+        if merged:
+            return json.dumps(merged, ensure_ascii=False)
+        return all_json_parts[0]
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

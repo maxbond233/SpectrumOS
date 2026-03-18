@@ -55,19 +55,47 @@ class DispersionAgent(AgentBase):
                 f"重要性: {s.why_it_matters}\n\n"
             )
 
-        response = await self.llm.complete(
+        task_context = f"任务: {task.name}\n指令: {task.message}\n"
+
+        # Step 1: Ask LLM to list concepts to extract (lightweight call)
+        plan_response = await self.llm.complete(
             agent_name=self.agent_name,
-            system=DISPERSION_SYSTEM,
+            system="你是知识提炼专家。只输出 JSON，不要输出其他内容。",
             messages=[{"role": "user", "content": (
-                f"任务: {task.name}\n"
-                f"指令: {task.message}\n\n"
+                f"{task_context}\n"
                 f"以下是已采集的素材：\n\n{source_text}\n"
-                "请从这些素材中提炼核心概念，创建知识卡片。返回 JSON 数组。"
+                "请列出应该提炼的核心概念清单。返回 JSON 数组，每项包含：\n"
+                '{"concept": "概念名称", "source_ids": [相关素材ID], "type": "概念/方法/工具/理论"}\n'
+                "只列出概念清单，不要生成完整卡片。"
             )}],
         )
 
+        try:
+            concept_plan = extract_json_from_llm(plan_response.content, expect_type=list)
+        except (json.JSONDecodeError, TypeError):
+            self.logger.warning("Failed to parse concept plan, falling back to single-pass")
+            concept_plan = None
+
+        # Step 2: Generate cards — batch by concepts to avoid truncation
+        if concept_plan and len(concept_plan) > 0:
+            all_cards_content = await self._batch_generate_cards(
+                task_context, source_text, concept_plan
+            )
+        else:
+            # Fallback: single-pass (original behavior)
+            response = await self.llm.complete(
+                agent_name=self.agent_name,
+                system=DISPERSION_SYSTEM,
+                messages=[{"role": "user", "content": (
+                    f"{task_context}\n"
+                    f"以下是已采集的素材：\n\n{source_text}\n"
+                    "请从这些素材中提炼核心概念，创建知识卡片。返回 JSON 数组。"
+                )}],
+            )
+            all_cards_content = response.content or ""
+
         # Parse wiki cards
-        cards = self._parse_cards(response.content, task.project_ref, project_domain)
+        cards = self._parse_cards(all_cards_content, task.project_ref, project_domain)
 
         if not cards:
             await self.db.update_task(
@@ -108,6 +136,41 @@ class DispersionAgent(AgentBase):
         )
 
         return events
+
+    async def _batch_generate_cards(
+        self, task_context: str, source_text: str, concept_plan: list[dict],
+    ) -> str:
+        """Generate wiki cards one concept at a time to avoid output truncation."""
+        merged: list = []
+
+        for i, concept in enumerate(concept_plan):
+            concept_name = concept.get("concept", "?")
+            concept_type = concept.get("type", "概念")
+            source_ids = concept.get("source_ids", [])
+
+            response = await self.llm.complete(
+                agent_name=self.agent_name,
+                system=DISPERSION_SYSTEM,
+                messages=[{"role": "user", "content": (
+                    f"{task_context}\n"
+                    f"以下是已采集的素材：\n\n{source_text}\n"
+                    f"请为以下概念生成 1 张完整的知识卡片（JSON 数组，包含 1 个元素）：\n"
+                    f"- {concept_name} (类型: {concept_type}, 相关素材: {source_ids})\n\n"
+                    "只生成这一个概念的卡片，不要添加其他概念。"
+                )}],
+            )
+
+            try:
+                parsed = extract_json_from_llm(response.content or "", expect_type=list)
+                merged.extend(parsed)
+            except (json.JSONDecodeError, TypeError):
+                if not merged:
+                    return response.content or ""
+                self.logger.warning("Failed to parse card for concept '%s', skipping", concept_name)
+
+        if merged:
+            return json.dumps(merged, ensure_ascii=False)
+        return "[]"
 
     def _parse_cards(self, content: str, project_ref: int | None, domain: str = "") -> list[dict]:
         """Parse LLM response into wiki card dicts.

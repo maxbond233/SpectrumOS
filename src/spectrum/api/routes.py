@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException
@@ -39,7 +40,10 @@ from spectrum.api.schemas import (
 from spectrum.db.activity_log import ActivityLogger
 from spectrum.db.models import ActivityLog, AgentTask, Output, Source, WikiCard
 from spectrum.db.operations import DatabaseOps
+from spectrum.llm.client import LLMClient
 from spectrum.orchestrator.scheduler import Scheduler
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -47,15 +51,18 @@ router = APIRouter()
 _scheduler: Scheduler | None = None
 _db: DatabaseOps | None = None
 _activity_logger: ActivityLogger | None = None
+_llm_client: LLMClient | None = None
 
 
 def configure(
-    scheduler: Scheduler, db: DatabaseOps, activity_logger: ActivityLogger
+    scheduler: Scheduler, db: DatabaseOps, activity_logger: ActivityLogger,
+    llm_client: LLMClient | None = None,
 ) -> None:
-    global _scheduler, _db, _activity_logger
+    global _scheduler, _db, _activity_logger, _llm_client
     _scheduler = scheduler
     _db = db
     _activity_logger = activity_logger
+    _llm_client = llm_client
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -71,6 +78,17 @@ def _dt(val) -> str:
 async def health():
     agents = list(_scheduler._agents.keys()) if _scheduler else []
     return HealthResponse(agents=agents)
+
+
+@router.get("/token-usage")
+async def token_usage():
+    """Return cumulative LLM token usage since server start."""
+    if not _llm_client:
+        return {"total": {"input": 0, "output": 0, "calls": 0}, "agents": {}}
+    return {
+        "total": _llm_client.total_usage,
+        "agents": _llm_client.agent_usage,
+    }
 
 
 # ── Trigger ──────────────────────────────────────────────────────────────────
@@ -698,12 +716,31 @@ async def download_output_markdown(output_id: int):
 @router.get("/outputs/{output_id}/html", response_class=HTMLResponse)
 async def render_output_html(output_id: int):
     import markdown as md
+    import re as _re
 
     o = await _db.get_output(output_id)
     if not o:
         raise HTTPException(404, f"Output {output_id} not found")
 
-    body = md.markdown(o.content or "", extensions=["tables", "fenced_code", "toc"])
+    # Protect LaTeX formulas from markdown parser
+    content_text = o.content or ""
+    math_blocks: list[str] = []
+
+    def _protect(m):
+        math_blocks.append(m.group(0))
+        return f"%%MATH{len(math_blocks) - 1}%%"
+
+    content_text = _re.sub(r"\$\$([\s\S]+?)\$\$", _protect, content_text)
+    content_text = _re.sub(r"\$([^\n$]+?)\$", _protect, content_text)
+    content_text = _re.sub(r"\\\[([\s\S]+?)\\\]", _protect, content_text)
+    content_text = _re.sub(r"\\\((.+?)\\\)", _protect, content_text)
+
+    body = md.markdown(content_text, extensions=["tables", "fenced_code", "toc"])
+
+    # Restore LaTeX formulas
+    for i, formula in enumerate(math_blocks):
+        body = body.replace(f"%%MATH{i}%%", formula)
+
     title = o.name or f"Output #{o.id}"
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -711,26 +748,130 @@ async def render_output_html(output_id: int):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
 <style>
-  body {{ max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font-family: -apple-system, "Noto Sans SC", sans-serif; line-height: 1.8; color: #1a1a1a; }}
-  h1, h2, h3 {{ margin-top: 1.6em; }}
-  pre {{ background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 4px; }}
-  code {{ font-size: 0.9em; }}
-  table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
-  th, td {{ border: 1px solid #ddd; padding: 0.5em 0.75em; text-align: left; }}
-  th {{ background: #f9f9f9; }}
-  blockquote {{ border-left: 4px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #555; }}
-  @media print {{ body {{ max-width: 100%; margin: 0; }} }}
+  body {{ max-width: 48rem; margin: 2rem auto; padding: 0 1.5rem; font-family: "Noto Serif SC", "Source Serif Pro", Georgia, serif; line-height: 1.9; color: #1a1a1a; font-size: 16px; }}
+  h1 {{ font-size: 1.8rem; margin-top: 0; border-bottom: 2px solid #333; padding-bottom: .4rem; }}
+  h2 {{ font-size: 1.35rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .2rem; }}
+  h3 {{ font-size: 1.1rem; margin-top: 1.5rem; }}
+  p {{ margin: 0.8em 0; text-align: justify; }}
+  pre {{ background: #f6f8fa; padding: 1em; overflow-x: auto; border-radius: 6px; font-size: 0.88em; line-height: 1.5; }}
+  code {{ font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 0.9em; }}
+  p code {{ background: #f0f0f0; padding: 0.15em 0.35em; border-radius: 3px; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 1.2em 0; font-size: 0.92em; }}
+  th, td {{ border: 1px solid #ccc; padding: 0.5em 0.75em; text-align: left; }}
+  th {{ background: #f5f5f5; font-weight: 600; }}
+  blockquote {{ border-left: 4px solid #8b5cf6; margin: 1.2em 0; padding: 0.5em 1em; color: #555; background: #faf8ff; border-radius: 0 4px 4px 0; }}
+  .katex-display {{ margin: 1.2em 0; overflow-x: auto; }}
+  a {{ color: #4f46e5; text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  hr {{ border: none; border-top: 1px solid #e5e5e5; margin: 2rem 0; }}
+  .doc-footer {{ color: #999; font-size: 0.82em; font-family: sans-serif; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e5e5e5; }}
+  @media print {{
+    body {{ max-width: 100%; margin: 0; padding: 1cm 2cm; font-size: 11pt; }}
+    pre {{ white-space: pre-wrap; }}
+    .no-print {{ display: none; }}
+    @page {{ margin: 2cm; }}
+  }}
 </style>
 </head>
 <body>
 <h1>{title}</h1>
 {body}
-<hr>
-<p style="color:#999; font-size:0.85em;">光谱 OS · {o.type or "Output"} · {_dt(o.updated_at)}</p>
+<div class="doc-footer">
+  光谱 OS · {o.type or "Output"} · {_dt(o.updated_at)}
+</div>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script>
+  renderMathInElement(document.body, {{
+    delimiters: [
+      {{left: "$$", right: "$$", display: true}},
+      {{left: "$", right: "$", display: false}},
+      {{left: "\\\\(", right: "\\\\)", display: false}},
+      {{left: "\\\\[", right: "\\\\]", display: true}}
+    ],
+    throwOnError: false
+  }});
+  hljs.highlightAll();
+</script>
 </body>
 </html>"""
     return HTMLResponse(content=html)
+
+
+@router.get("/outputs/{output_id}/pdf")
+async def download_output_pdf(output_id: int):
+    import shutil
+    import subprocess
+    import tempfile
+
+    o = await _db.get_output(output_id)
+    if not o:
+        raise HTTPException(404, f"Output {output_id} not found")
+
+    content_md = o.content or ""
+    title = o.name or f"Output #{o.id}"
+    filename = f"{title}.pdf"
+
+    # Strategy 1: pandoc + xelatex (best quality)
+    if shutil.which("pandoc"):
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".md", mode="w", encoding="utf-8", delete=False) as f:
+                f.write(f"---\ntitle: \"{title}\"\n---\n\n{content_md}")
+                md_path = f.name
+            pdf_path = md_path.replace(".md", ".pdf")
+            result = subprocess.run(
+                [
+                    "pandoc", md_path,
+                    "-o", pdf_path,
+                    "--pdf-engine=xelatex",
+                    "-V", "CJKmainfont=Noto Sans SC",
+                    "-V", "geometry:margin=2.5cm",
+                    "-V", "fontsize=11pt",
+                    "-V", "linestretch=1.5",
+                    "--highlight-style=tango",
+                ],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                import os
+                with open(pdf_path, "rb") as pf:
+                    pdf_bytes = pf.read()
+                os.unlink(md_path)
+                os.unlink(pdf_path)
+                return Response(
+                    content=pdf_bytes,
+                    media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                )
+            else:
+                logger.warning("Pandoc failed: %s", result.stderr[:500])
+        except Exception as e:
+            logger.warning("Pandoc PDF generation failed: %s", e)
+
+    # Strategy 2: weasyprint (fallback)
+    try:
+        from weasyprint import HTML as WeasyHTML
+        html_content = await render_output_html(output_id)
+        pdf_bytes = WeasyHTML(string=html_content.body.decode()).write_pdf()
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning("WeasyPrint PDF generation failed: %s", e)
+
+    raise HTTPException(
+        501,
+        "PDF 生成不可用。请安装 pandoc+xelatex 或 weasyprint: "
+        "pip install weasyprint",
+    )
 
 
 # ── Explorer: Projects detail ────────────────────────────────────────────────
