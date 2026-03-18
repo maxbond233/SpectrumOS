@@ -93,6 +93,11 @@ class AgentsConfig(BaseModel):
     )
 
 
+class KnowledgeConfig(BaseModel):
+    max_tag_depth: int = 3
+    fts_rebuild_on_startup: bool = True
+
+
 # ── Root Settings ────────────────────────────────────────────────────────────
 
 class Settings(BaseSettings):
@@ -108,6 +113,7 @@ class Settings(BaseSettings):
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

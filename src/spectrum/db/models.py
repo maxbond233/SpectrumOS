@@ -1,12 +1,15 @@
-"""SQLAlchemy ORM models for the 6 core tables.
+"""SQLAlchemy ORM models for the core tables.
 
 Maps 1:1 to the original Notion databases:
   ResearchProject, Source, WikiCard, Output, AgentTask, ActivityLog
+Plus v0.4 knowledge layer:
+  Tag, CardTag, CardLink
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -54,6 +57,7 @@ class Source(Base):
     priority: Mapped[str] = mapped_column(String(10), default="")
     domain: Mapped[str] = mapped_column(String(200), default="")
     url: Mapped[str] = mapped_column(String(2000), default="")
+    url_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # SHA256[:16] for dedup
     authors: Mapped[str] = mapped_column(String(500), default="")
     year: Mapped[str] = mapped_column(String(10), default="")
     output_type: Mapped[str] = mapped_column(String(100), default="")
@@ -155,4 +159,49 @@ class ActivityLog(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ── v0.4 Knowledge Layer ─────────────────────────────────────────────────────
+
+
+class Tag(Base):
+    """🏷️ Tags — 层级标签树"""
+
+    __tablename__ = "tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    parent_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # FK → tags.id, NULL = root
+    level: Mapped[int] = mapped_column(Integer, default=1)  # 1=root, 2=child, 3=grandchild
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CardTag(Base):
+    """🔗 Card-Tag junction — 多对多关联"""
+
+    __tablename__ = "card_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    card_id: Mapped[int] = mapped_column(Integer, nullable=False)  # FK → wiki_cards.id
+    tag_id: Mapped[int] = mapped_column(Integer, nullable=False)  # FK → tags.id
+    source: Mapped[str] = mapped_column(String(20), default="ai")  # "ai" | "human"
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class CardLink(Base):
+    """🔗 Card Links — 概念双向链接"""
+
+    __tablename__ = "card_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_id: Mapped[int] = mapped_column(Integer, nullable=False)  # FK → wiki_cards.id
+    to_id: Mapped[int] = mapped_column(Integer, nullable=False)  # FK → wiki_cards.id
+    relation: Mapped[str] = mapped_column(String(50), default="相关")  # 相关/前置/演进/对比/包含
+    source: Mapped[str] = mapped_column(String(20), default="ai")  # "ai" | "human"
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

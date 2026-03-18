@@ -162,5 +162,26 @@ def logs(limit: int = typer.Option(20, help="Number of recent logs")):
     asyncio.run(_logs())
 
 
+@app.command()
+def reindex():
+    """Rebuild the FTS5 full-text search index."""
+    async def _reindex():
+        from spectrum.config import load_settings, setup_logging
+        from spectrum.db.engine import init_engine, create_tables, close_engine
+        from spectrum.db.fts import rebuild_fts_index
+
+        setup_logging()
+        settings = load_settings()
+        init_engine(settings.database)
+        await create_tables()
+
+        count = await rebuild_fts_index()
+        typer.echo(f"FTS index rebuilt: {count} entries indexed.")
+
+        await close_engine()
+
+    asyncio.run(_reindex())
+
+
 if __name__ == "__main__":
     app()

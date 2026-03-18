@@ -59,6 +59,13 @@ async def run() -> None:
     await create_tables()
     logger.info("Database initialized")
 
+    # Auto-rebuild FTS index if empty
+    if settings.knowledge.fts_rebuild_on_startup:
+        from spectrum.db.fts import fts_is_empty, rebuild_fts_index
+        if await fts_is_empty():
+            count = await rebuild_fts_index()
+            logger.info("FTS index auto-rebuilt: %d entries", count)
+
     db = DatabaseOps()
     activity_logger = ActivityLogger(db)
 

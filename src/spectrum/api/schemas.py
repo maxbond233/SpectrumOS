@@ -255,3 +255,85 @@ class LogResponse(BaseModel):
     notes: str
     needs_review: bool
     created_at: str
+
+
+# ── v0.4 Knowledge Layer ────────────────────────────────────────────────────
+
+class CreateTagRequest(BaseModel):
+    name: str
+    parent_id: int | None = None
+    description: str | None = None
+
+
+class UpdateTagRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class TagResponse(BaseModel):
+    id: int
+    name: str
+    parent_id: int | None
+    level: int
+    description: str | None
+    created_at: str
+
+
+class TagTreeNode(BaseModel):
+    id: int
+    name: str
+    level: int
+    children: list[TagTreeNode] = []
+
+
+class CardTagsRequest(BaseModel):
+    tag_ids: list[int]
+    source: str = "human"
+
+
+class CreateCardLinkRequest(BaseModel):
+    to_id: int
+    relation: str = "相关"
+    note: str | None = None
+
+
+class CardLinkResponse(BaseModel):
+    to_id: int | None = None
+    from_id: int | None = None
+    concept: str
+    relation: str
+    note: str | None = None
+
+
+class CardLinksResponse(BaseModel):
+    outgoing: list[CardLinkResponse]
+    incoming: list[CardLinkResponse]
+
+
+class GraphNode(BaseModel):
+    id: int
+    concept: str
+
+
+class GraphEdge(BaseModel):
+    from_id: int = None
+    to_id: int = None
+    relation: str
+
+
+class GraphResponse(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+class SearchResultItem(BaseModel):
+    entity_type: str
+    entity_id: int
+    title: str
+    snippet: str
+    rank: float
+
+
+class SearchResponse(BaseModel):
+    results: list[SearchResultItem]
+    total: int

@@ -10,9 +10,17 @@ from fastapi.responses import HTMLResponse, Response
 
 from spectrum.api.schemas import (
     AgentInfo,
+    CardLinksResponse,
+    CardLinkResponse,
+    CardTagsRequest,
+    CreateCardLinkRequest,
     CreateProjectRequest,
     CreateSourceRequest,
+    CreateTagRequest,
     DashboardStatsResponse,
+    GraphEdge,
+    GraphNode,
+    GraphResponse,
     HealthResponse,
     LogResponse,
     OutputDetailResponse,
@@ -21,10 +29,13 @@ from spectrum.api.schemas import (
     ProjectDetailResponse,
     ProjectResponse,
     ReviewItemResponse,
+    SearchResponse,
+    SearchResultItem,
     SourceDetailResponse,
     SourceResponse,
     StatsResponse,
     TableStats,
+    TagResponse,
     TaskDetailResponse,
     TaskResponse,
     TriggerAgentRequest,
@@ -32,6 +43,7 @@ from spectrum.api.schemas import (
     UpdateOutputRequest,
     UpdateProjectRequest,
     UpdateSourceRequest,
+    UpdateTagRequest,
     UpdateTaskRequest,
     UpdateWikiCardRequest,
     WikiCardDetailResponse,
@@ -605,9 +617,25 @@ async def browse_wiki_cards(
     domain: str | None = None,
     maturity: str | None = None,
     project_ref: int | None = None,
+    tag_id: int | None = None,
     limit: int = 20,
     offset: int = 0,
 ):
+    # Tag-based filtering takes priority
+    if tag_id is not None:
+        items, total = await _db.get_cards_by_tag(tag_id, include_descendants=True, limit=limit, offset=offset)
+        return PaginatedResponse(
+            items=[
+                WikiCardResponse(
+                    id=w.id, concept=w.concept, type=w.type, domain=w.domain,
+                    maturity=w.maturity, project_ref=w.project_ref,
+                    needs_review=w.needs_review, created_at=_dt(w.created_at),
+                ).model_dump()
+                for w in items
+            ],
+            total=total, limit=limit, offset=offset,
+        )
+
     filters: dict = {}
     if type:
         filters["type"] = type
@@ -633,12 +661,17 @@ async def browse_wiki_cards(
     )
 
 
-@router.get("/wiki-cards/{card_id}", response_model=WikiCardDetailResponse)
+@router.get("/wiki-cards/{card_id}")
 async def get_wiki_card(card_id: int):
     w = await _db.get_wiki_card(card_id)
     if not w:
         raise HTTPException(404, f"WikiCard {card_id} not found")
-    return WikiCardDetailResponse(
+
+    # Enrich with tags and links
+    tags = await _db.get_card_tags(card_id)
+    links = await _db.get_card_links(card_id)
+
+    base = WikiCardDetailResponse(
         id=w.id, concept=w.concept, type=w.type, domain=w.domain,
         maturity=w.maturity, project_ref=w.project_ref,
         needs_review=w.needs_review, created_at=_dt(w.created_at),
@@ -646,7 +679,20 @@ async def get_wiki_card(card_id: int):
         key_points=w.key_points, example=w.example,
         reading_ref=w.reading_ref, assigned_agent=w.assigned_agent,
         updated_at=_dt(w.updated_at),
-    )
+    ).model_dump()
+
+    base["tags"] = [{"id": t.id, "name": t.name, "level": t.level} for t in tags]
+    base["links"] = {
+        "outgoing": [
+            {"to_id": l["to_id"], "concept": l["concept"], "relation": l["relation"]}
+            for l in links["outgoing"]
+        ],
+        "incoming": [
+            {"from_id": l["from_id"], "concept": l["concept"], "relation": l["relation"]}
+            for l in links["incoming"]
+        ],
+    }
+    return base
 
 
 # ── Explorer: Outputs ────────────────────────────────────────────────────────
@@ -962,4 +1008,177 @@ async def browse_logs(
             for entry in items
         ],
         total=total, limit=limit, offset=offset,
+    )
+
+
+# ── Tags ──────────────────────────────────────────────────────────────────────
+
+@router.get("/tags")
+async def list_tags(parent_id: int | None = None):
+    if parent_id is not None:
+        tags = await _db.list_tags(parent_id=parent_id)
+    else:
+        tags = await _db.list_tags()
+    return [
+        TagResponse(
+            id=t.id, name=t.name, parent_id=t.parent_id, level=t.level,
+            description=t.description, created_at=_dt(t.created_at),
+        ).model_dump()
+        for t in tags
+    ]
+
+
+@router.get("/tags/tree")
+async def get_tag_tree():
+    return await _db.get_tag_tree()
+
+
+@router.post("/tags", status_code=201)
+async def create_tag(req: CreateTagRequest):
+    tag = await _db.create_tag(name=req.name, parent_id=req.parent_id, description=req.description)
+    await _activity_logger.log(
+        actor="human", action_type="Create", target_db="Tags",
+        description=f"创建标签: {req.name}", target_record=str(tag.id),
+    )
+    return TagResponse(
+        id=tag.id, name=tag.name, parent_id=tag.parent_id, level=tag.level,
+        description=tag.description, created_at=_dt(tag.created_at),
+    )
+
+
+@router.patch("/tags/{tag_id}")
+async def update_tag(tag_id: int, req: UpdateTagRequest):
+    tag = await _db.get_tag(tag_id)
+    if not tag:
+        raise HTTPException(404, f"Tag {tag_id} not found")
+    fields: dict = {}
+    if req.name is not None:
+        fields["name"] = req.name
+    if req.description is not None:
+        fields["description"] = req.description
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+    updated = await _db.update_tag(tag_id, **fields)
+    await _activity_logger.log(
+        actor="human", action_type="Update", target_db="Tags",
+        description=f"更新标签 #{tag_id}", target_record=str(tag_id),
+        before={"name": tag.name}, after=fields,
+    )
+    return TagResponse(
+        id=updated.id, name=updated.name, parent_id=updated.parent_id, level=updated.level,
+        description=updated.description, created_at=_dt(updated.created_at),
+    )
+
+
+# ── Card Tags ─────────────────────────────────────────────────────────────────
+
+@router.get("/wiki-cards/{card_id}/tags")
+async def get_card_tags(card_id: int):
+    card = await _db.get_wiki_card(card_id)
+    if not card:
+        raise HTTPException(404, f"WikiCard {card_id} not found")
+    tags = await _db.get_card_tags(card_id)
+    return [{"id": t.id, "name": t.name, "level": t.level} for t in tags]
+
+
+@router.post("/wiki-cards/{card_id}/tags", status_code=201)
+async def add_card_tags(card_id: int, req: CardTagsRequest):
+    card = await _db.get_wiki_card(card_id)
+    if not card:
+        raise HTTPException(404, f"WikiCard {card_id} not found")
+    added = []
+    for tid in req.tag_ids:
+        ct = await _db.tag_card(card_id, tid, source=req.source)
+        if ct:
+            added.append(tid)
+    await _activity_logger.log(
+        actor="human", action_type="Update", target_db="Card Tags",
+        description=f"卡片 #{card_id} 添加标签 {added}", target_record=str(card_id),
+    )
+    return {"card_id": card_id, "added_tag_ids": added}
+
+
+@router.delete("/wiki-cards/{card_id}/tags/{tag_id}")
+async def remove_card_tag(card_id: int, tag_id: int):
+    removed = await _db.untag_card(card_id, tag_id)
+    if not removed:
+        raise HTTPException(404, "Tag association not found")
+    await _activity_logger.log(
+        actor="human", action_type="Update", target_db="Card Tags",
+        description=f"卡片 #{card_id} 移除标签 #{tag_id}", target_record=str(card_id),
+    )
+    return {"ok": True}
+
+
+@router.get("/tags/{tag_id}/cards", response_model=PaginatedResponse)
+async def get_cards_by_tag(tag_id: int, descendants: bool = True, limit: int = 20, offset: int = 0):
+    items, total = await _db.get_cards_by_tag(tag_id, include_descendants=descendants, limit=limit, offset=offset)
+    return PaginatedResponse(
+        items=[
+            WikiCardResponse(
+                id=w.id, concept=w.concept, type=w.type, domain=w.domain,
+                maturity=w.maturity, project_ref=w.project_ref,
+                needs_review=w.needs_review, created_at=_dt(w.created_at),
+            ).model_dump()
+            for w in items
+        ],
+        total=total, limit=limit, offset=offset,
+    )
+
+
+# ── Card Links ────────────────────────────────────────────────────────────────
+
+@router.get("/wiki-cards/{card_id}/links")
+async def get_card_links(card_id: int):
+    card = await _db.get_wiki_card(card_id)
+    if not card:
+        raise HTTPException(404, f"WikiCard {card_id} not found")
+    links = await _db.get_card_links(card_id)
+    return CardLinksResponse(
+        outgoing=[CardLinkResponse(to_id=l["to_id"], concept=l["concept"], relation=l["relation"], note=l.get("note")) for l in links["outgoing"]],
+        incoming=[CardLinkResponse(from_id=l["from_id"], concept=l["concept"], relation=l["relation"], note=l.get("note")) for l in links["incoming"]],
+    )
+
+
+@router.post("/wiki-cards/{card_id}/links", status_code=201)
+async def create_card_link(card_id: int, req: CreateCardLinkRequest):
+    card = await _db.get_wiki_card(card_id)
+    if not card:
+        raise HTTPException(404, f"WikiCard {card_id} not found")
+    target = await _db.get_wiki_card(req.to_id)
+    if not target:
+        raise HTTPException(404, f"Target WikiCard {req.to_id} not found")
+    link = await _db.create_card_link(
+        from_id=card_id, to_id=req.to_id, relation=req.relation, source="human", note=req.note,
+    )
+    await _activity_logger.log(
+        actor="human", action_type="Create", target_db="Card Links",
+        description=f"卡片 #{card_id} → #{req.to_id} ({req.relation})", target_record=str(link.id),
+    )
+    return {"id": link.id, "from_id": card_id, "to_id": req.to_id, "relation": req.relation}
+
+
+@router.get("/wiki-cards/{card_id}/graph")
+async def get_card_graph(card_id: int, depth: int = 1):
+    card = await _db.get_wiki_card(card_id)
+    if not card:
+        raise HTTPException(404, f"WikiCard {card_id} not found")
+    graph = await _db.get_link_graph(card_id, depth=min(depth, 3))
+    return GraphResponse(
+        nodes=[GraphNode(id=n["id"], concept=n["concept"]) for n in graph["nodes"]],
+        edges=[GraphEdge(from_id=e["from"], to_id=e["to"], relation=e["relation"]) for e in graph["edges"]],
+    )
+
+
+# ── Full-Text Search ──────────────────────────────────────────────────────────
+
+@router.get("/search")
+async def search(q: str, type: str | None = None, limit: int = 20):
+    from spectrum.db.fts import search_fts
+    if not q.strip():
+        return SearchResponse(results=[], total=0)
+    results = await search_fts(q, entity_type=type, limit=limit)
+    return SearchResponse(
+        results=[SearchResultItem(**r) for r in results],
+        total=len(results),
     )

@@ -6,12 +6,20 @@ Every write operation should be logged via @logged or ActivityLogger.log().
 from __future__ import annotations
 
 import functools
+import json
 import logging
 from typing import Any, Callable
 
 from spectrum.db.operations import DatabaseOps
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize(val: str | dict | Any) -> str:
+    """Serialize before/after values: dicts → JSON, strings pass through."""
+    if isinstance(val, dict):
+        return json.dumps(val, ensure_ascii=False)
+    return str(val) if val else ""
 
 
 class ActivityLogger:
@@ -27,8 +35,8 @@ class ActivityLogger:
         target_db: str,
         description: str,
         target_record: str = "",
-        before: str = "",
-        after: str = "",
+        before: str | dict = "",
+        after: str | dict = "",
         confidence: float | None = None,
         needs_review: bool = False,
         notes: str = "",
@@ -41,8 +49,8 @@ class ActivityLogger:
                 action_type=action_type,
                 target_db=target_db,
                 target_record=target_record,
-                before=before,
-                after=after,
+                before=_serialize(before),
+                after=_serialize(after),
                 confidence=confidence,
                 needs_review=needs_review,
                 notes=notes,
