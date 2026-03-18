@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
+from spectrum.agents._parsing import extract_json_from_llm
 from spectrum.agents.base import AgentBase
 from spectrum.db.models import AgentTask
 from spectrum.llm.prompts import (
@@ -31,6 +33,10 @@ class DiffractionAgent(AgentBase):
 
     async def process_task(self, task: AgentTask) -> list[str]:
         """Synthesize wiki cards into an output document via 3-stage pipeline."""
+        # Route synthesis tasks to dedicated handler
+        if "综合产出" in (task.name or ""):
+            return await self._process_synthesis_task(task)
+
         events: list[str] = []
 
         # Get project info
@@ -170,6 +176,75 @@ class DiffractionAgent(AgentBase):
 
         return events
 
+    # ── Synthesis: merge multiple outputs into one ────────────────────────
+
+    async def _process_synthesis_task(self, task: AgentTask) -> list[str]:
+        """Merge multiple sub-topic outputs into a single consolidated document."""
+        events: list[str] = []
+
+        project = None
+        if task.project_ref:
+            project = await self.db.get_project(task.project_ref)
+        project_name = project.name if project else task.name
+        output_type = project.output_type if project else "综述"
+
+        # Gather existing outputs
+        outputs = []
+        if task.project_ref:
+            outputs = list(await self.db.list_outputs(project_ref=task.project_ref))
+        if not outputs:
+            await self.db.update_task(task.id, ai_notes="无可合并的产出")
+            return events
+
+        # Build combined content
+        parts = []
+        for o in outputs:
+            parts.append(f"## 子课题产出: {o.name}\n\n{o.content or ''}")
+        combined = "\n\n---\n\n".join(parts)
+
+        response = await self.llm.complete(
+            agent_name=self.agent_name,
+            system=DIFFRACTION_SYSTEM,
+            messages=[{"role": "user", "content": (
+                f"课题: {project_name}\n"
+                f"产出类型: {output_type}\n\n"
+                f"以下是多个子课题的独立产出，请将它们合并为一篇完整的综合文稿。\n"
+                f"要求: 统一叙事线，消除重复内容，补充过渡段落，保持引用标注。\n"
+                f"使用 Markdown 格式，直接输出正文。\n\n"
+                f"{combined[:30000]}"
+            )}],
+        )
+        final_content = response.content or ""
+
+        output_data = self._build_output(
+            f"综合报告 · {project_name}", output_type, final_content,
+            "", "", task.project_ref,
+        )
+        if output_data:
+            output_data.pop("_gap_report", "")
+            created = await self.db.create_output(**output_data)
+            await self.activity_logger.log(
+                actor=self.agent_name,
+                action_type="Create",
+                target_db="Outputs",
+                description=f"综合产出: {output_data['name']}",
+                target_record=str(created.id),
+                needs_review=True,
+            )
+            events.append(f"output_created:{created.id}")
+            await self.db.update_task(
+                task.id, message=f"已产出综合文稿: {output_data['name']}",
+            )
+        else:
+            await self.db.update_task(
+                task.id, ai_notes=final_content[:500] if final_content else "",
+            )
+            raise RuntimeError(
+                f"未能产出综合文稿 (内容长度: {len(final_content or '')})"
+            )
+
+        return events
+
     # ── Stage 1: Outline generation ──────────────────────────────────────
 
     async def _generate_outline(
@@ -188,7 +263,7 @@ class DiffractionAgent(AgentBase):
                 system="你是结构化写作专家。只输出 JSON，不要输出其他内容。",
                 messages=[{"role": "user", "content": prompt}],
             )
-            return self._extract_json(response.content, expect_type=dict)
+            return extract_json_from_llm(response.content, expect_type=dict)
         except Exception:
             self.logger.warning("Failed to generate outline, falling back to single-pass")
             return None
@@ -273,15 +348,10 @@ class DiffractionAgent(AgentBase):
                 f"产出类型: {output_type}\n"
                 f"任务指令: {task_message}\n\n"
                 f"以下是相关知识卡片：\n\n{card_text}\n"
-                "请合成一篇结构化文稿。返回 JSON 对象。"
+                "请合成一篇结构化文稿。使用 Markdown 格式，直接输出正文。"
             )}],
         )
-        # Try to extract content from JSON response
-        try:
-            raw = self._extract_json(response.content, expect_type=dict)
-            return raw.get("content", response.content or "")
-        except Exception:
-            return response.content or ""
+        return response.content or ""
 
     # ── Stage 3: Critical review ─────────────────────────────────────────
 
@@ -303,7 +373,7 @@ class DiffractionAgent(AgentBase):
                 system="你是学术写作审稿专家。只输出 JSON，不要输出其他内容。",
                 messages=[{"role": "user", "content": prompt}],
             )
-            return self._extract_json(response.content, expect_type=dict)
+            return extract_json_from_llm(response.content, expect_type=dict)
         except Exception:
             self.logger.warning("Failed to parse review result")
             return None
@@ -347,6 +417,30 @@ class DiffractionAgent(AgentBase):
         if not content or len(content.strip()) < 50:
             return None
 
+        # Safety net: unwrap JSON if LLM returned {"title":..,"content":..}
+        stripped = content.strip()
+        if stripped.startswith("{"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict) and "content" in parsed:
+                    content = parsed["content"]
+                    if parsed.get("title"):
+                        title = parsed["title"]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Extract GAP_REPORT from HTML comment at end of content
+        gap_match = re.search(
+            r"<!--\s*GAP_REPORT\s*\n(.*?)-->", content, re.DOTALL
+        )
+        if gap_match:
+            extracted_gap = gap_match.group(1).strip()
+            if extracted_gap:
+                gap_report = (
+                    f"{gap_report}\n{extracted_gap}".strip() if gap_report else extracted_gap
+                )
+            content = content[: gap_match.start()].rstrip()
+
         word_count = len(content)
         if gap_report and gap_report.strip():
             ai_notes = f"{ai_notes}\n\n【缺口报告】\n{gap_report}".strip()
@@ -379,35 +473,3 @@ class DiffractionAgent(AgentBase):
                 f"示例: {c.example}\n\n"
             )
         return card_text
-
-    @staticmethod
-    def _extract_json(content: str, expect_type: type = dict):
-        """Extract JSON from LLM response, handling markdown code blocks."""
-        text = content.strip()
-        if "```" in text:
-            lines = text.split("\n")
-            inside = False
-            json_lines = []
-            for line in lines:
-                if line.strip().startswith("```"):
-                    inside = not inside
-                    continue
-                if inside:
-                    json_lines.append(line)
-            if json_lines:
-                text = "\n".join(json_lines)
-
-        if expect_type is dict:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-        else:
-            start = text.find("[")
-            end = text.rfind("]") + 1
-
-        if start >= 0 and end > start:
-            text = text[start:end]
-
-        result = json.loads(text)
-        if not isinstance(result, expect_type):
-            raise TypeError(f"Expected {expect_type}, got {type(result)}")
-        return result

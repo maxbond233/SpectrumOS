@@ -104,6 +104,8 @@ class ReviewItemResponse(BaseModel):
     table: str
     title: str
     status: str
+    summary: str = ""
+    ai_notes: str = ""
     created_at: str
     updated_at: str
 

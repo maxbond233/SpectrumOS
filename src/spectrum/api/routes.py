@@ -488,27 +488,40 @@ async def list_reviews():
     for p in await _db.list_projects(review_needed=True):
         items.append(ReviewItemResponse(
             id=p.id, table="projects", title=p.name,
-            status=p.status, created_at=_dt(p.created_at), updated_at=_dt(p.updated_at),
+            status=p.status,
+            summary=(p.research_questions or "")[:200],
+            ai_notes=(p.ai_notes or "")[:200],
+            created_at=_dt(p.created_at), updated_at=_dt(p.updated_at),
         ))
     for s in await _db.list_sources(review_needed=True):
         items.append(ReviewItemResponse(
             id=s.id, table="sources", title=s.title,
-            status=s.status, created_at=_dt(s.created_at), updated_at=_dt(s.updated_at),
+            status=s.status,
+            summary=(s.extracted_summary or "")[:200],
+            created_at=_dt(s.created_at), updated_at=_dt(s.updated_at),
         ))
     for w in await _db.list_wiki_cards(needs_review=True):
         items.append(ReviewItemResponse(
             id=w.id, table="wiki_cards", title=w.concept,
-            status=w.maturity, created_at=_dt(w.created_at), updated_at=_dt(w.updated_at),
+            status=w.maturity,
+            summary=(w.definition or "")[:200],
+            created_at=_dt(w.created_at), updated_at=_dt(w.updated_at),
         ))
     for o in await _db.list_outputs(review_needed=True):
         items.append(ReviewItemResponse(
             id=o.id, table="outputs", title=o.name,
-            status=o.status, created_at=_dt(o.created_at), updated_at=_dt(o.updated_at),
+            status=o.status,
+            summary=(o.content or "")[:200],
+            ai_notes=(o.ai_notes or "")[:200],
+            created_at=_dt(o.created_at), updated_at=_dt(o.updated_at),
         ))
     for t in await _db.list_tasks(review_needed=True):
         items.append(ReviewItemResponse(
             id=t.id, table="tasks", title=t.name,
-            status=t.status, created_at=_dt(t.created_at), updated_at=_dt(t.updated_at),
+            status=t.status,
+            summary=(t.message or "")[:200],
+            ai_notes=(t.ai_notes or "")[:200],
+            created_at=_dt(t.created_at), updated_at=_dt(t.updated_at),
         ))
 
     items.sort(key=lambda x: x.updated_at, reverse=True)

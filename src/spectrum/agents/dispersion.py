@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
+from spectrum.agents._parsing import extract_json_from_llm, normalize_field
 from spectrum.agents.base import AgentBase
 from spectrum.db.models import AgentTask
 from spectrum.llm.prompts import DISPERSION_SYSTEM
@@ -28,10 +30,13 @@ class DispersionAgent(AgentBase):
 
         # Gather collected sources for this project
         sources = []
+        project = None
         if task.project_ref:
+            project = await self.db.get_project(task.project_ref)
             sources = list(await self.db.list_sources(
                 project_ref=task.project_ref, status="Collected"
             ))
+        project_domain = project.domain if project else ""
 
         if not sources:
             self.logger.info("No collected sources found for project %s", task.project_ref)
@@ -62,7 +67,7 @@ class DispersionAgent(AgentBase):
         )
 
         # Parse wiki cards
-        cards = self._parse_cards(response.content, task.project_ref)
+        cards = self._parse_cards(response.content, task.project_ref, project_domain)
 
         if not cards:
             await self.db.update_task(
@@ -104,40 +109,51 @@ class DispersionAgent(AgentBase):
 
         return events
 
-    def _parse_cards(self, content: str, project_ref: int | None) -> list[dict]:
+    def _parse_cards(self, content: str, project_ref: int | None, domain: str = "") -> list[dict]:
         """Parse LLM response into wiki card dicts.
 
-        Falls back to a single card from raw content if JSON parsing fails.
+        Falls back to text-splitting, then a single card if JSON parsing fails.
         """
-        text = content.strip()
-
-        # Try to extract JSON array from markdown code blocks or raw text
-        if "```" in text:
-            start = text.find("[")
-            end = text.rfind("]") + 1
-            if start >= 0 and end > start:
-                text = text[start:end]
-        elif not text.startswith("["):
-            start = text.find("[")
-            end = text.rfind("]") + 1
-            if start >= 0 and end > start:
-                text = text[start:end]
-
         try:
-            raw = json.loads(text)
-            if not isinstance(raw, list):
-                raw = [raw]
-        except json.JSONDecodeError:
+            raw = extract_json_from_llm(content, expect_type=list)
+        except (json.JSONDecodeError, TypeError):
             self.logger.warning(
                 "Failed to parse wiki cards from LLM response: %s", content[:200]
             )
-            # Fallback: create a single card from raw content
+            # Secondary fallback: split by numbered items or markdown headings
+            chunks = re.split(r"\n(?=\d+[\.\)、]|\#{1,3}\s)", content.strip())
+            cards: list[dict] = []
+            for i, chunk in enumerate(chunks):
+                chunk = chunk.strip()
+                if len(chunk) < 30:
+                    continue
+                first_line = chunk.split("\n")[0][:60].strip("# ").strip("0123456789.、) ")
+                concept = (
+                    first_line
+                    if len(first_line) > 5
+                    else f"概念 {i + 1} · 课题{project_ref or '?'}"
+                )
+                cards.append({
+                    "concept": concept,
+                    "type": "概念",
+                    "domain": domain,
+                    "definition": chunk[:500],
+                    "explanation": chunk[:5000],
+                    "key_points": "",
+                    "example": "",
+                    "maturity": "Seed",
+                    "project_ref": project_ref,
+                    "assigned_agent": "dispersion",
+                })
+            if cards:
+                return cards
+            # Final fallback: single card with content-derived concept name
             if len(content.strip()) > 50:
                 self.logger.info("Creating fallback wiki card from raw LLM response")
                 return [{
-                    "concept": f"分析笔记 — 课题 {project_ref or '未知'}",
+                    "concept": content.strip().split("\n")[0][:60] or "未命名概念",
                     "type": "概念",
-                    "domain": "",
+                    "domain": domain,
                     "definition": content[:500],
                     "explanation": content[:5000],
                     "key_points": "",
@@ -153,11 +169,11 @@ class DispersionAgent(AgentBase):
             cards.append({
                 "concept": r.get("concept", "未命名概念"),
                 "type": r.get("type", "概念"),
-                "domain": r.get("domain", ""),
-                "definition": r.get("definition", ""),
-                "explanation": r.get("explanation", ""),
-                "key_points": r.get("key_points", ""),
-                "example": r.get("example", ""),
+                "domain": r.get("domain", "") or domain,
+                "definition": normalize_field(r.get("definition", "")),
+                "explanation": normalize_field(r.get("explanation", "")),
+                "key_points": normalize_field(r.get("key_points", "")),
+                "example": normalize_field(r.get("example", "")),
                 "maturity": "Seed",
                 "project_ref": project_ref,
                 "assigned_agent": "dispersion",

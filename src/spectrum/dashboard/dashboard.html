@@ -94,6 +94,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 .db-recent{border-top:1px solid rgba(255,255,255,.04);padding-top:.6rem}
 .db-recent-title{font-size:.6rem;color:var(--t3);font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:.4rem}
 .db-recent-item{display:flex;align-items:center;gap:.4rem;padding:3px 0;font-size:.72rem;color:var(--t2)}
+.db-recent-item span[title]{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-open-link{display:inline-block;margin-top:.5rem;font-size:.65rem;font-family:var(--mono);color:var(--t2);text-decoration:none;border:1px solid var(--bd);border-radius:8px;padding:4px 8px}
+.db-open-link:hover{color:var(--t1);border-color:var(--bd2);background:var(--bg3)}
 .db-recent-item a{color:var(--t2);text-decoration:none;transition:color .15s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .db-recent-item a:hover{color:var(--t1)}
 .db-recent-item .badge{font-size:.55rem;padding:1px 6px;border-radius:8px;font-family:var(--mono);flex-shrink:0}
@@ -148,6 +151,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 .form-submit:hover{opacity:.85}
 .form-submit:disabled{opacity:.4;cursor:not-allowed}
 
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid var(--purple);
+  outline-offset:2px;
+}
+
 /* Toast */
 .toast-container{position:fixed;top:1rem;right:1rem;z-index:1000;display:flex;flex-direction:column;gap:.5rem}
 .toast{padding:.6rem 1rem;border-radius:var(--r-sm);font-size:.75rem;font-family:var(--sans);animation:fadeUp .3s ease;max-width:320px}
@@ -165,6 +173,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
   .rules-grid{grid-template-columns:1fr}
   .hero h1{font-size:1.8rem}
   .container{padding:1rem}
+  .section-header .refresh-btn,.agent-trigger,.task-status-btn,.form-submit{min-height:36px;padding:8px 12px;font-size:.72rem}
 }
 @media(max-width:480px){
   .agent-grid{grid-template-columns:repeat(2,1fr)}
@@ -288,6 +297,7 @@ const STATUS_COLORS = {
   'Done':'#10b981','Archived':'#374151',
   'Collected':'#6b7280','To Read':'#3b82f6','Reading':'#f59e0b','Processed':'#10b981',
   'Seed':'#f59e0b','Growing':'#3b82f6','Stable':'#10b981',
+  '待审核':'#f59e0b',
   'Create':'#10b981','Update':'#3b82f6','Summarize':'#8b5cf6','Classify':'#f59e0b',
   'Link':'#06b6d4','Review':'#ec4899','Archive':'#6b7280','Other':'#374151',
   'P1':'#ef4444','P2':'#f59e0b','P3':'#6b7280',
@@ -414,7 +424,7 @@ function renderDatabases(data) {
       <div class="db-breakdown">${makeChips(db.outputs.secondary.type||{}, STATUS_COLORS)}</div>
       ${makeRecent(db.outputs.recent)}
     </a>
-    <a class="db-card" href="/explorer#tasks">
+    <div class="db-card">
       <div class="db-head"><span class="db-icon">📋</span><span class="db-name">Tasks</span><span class="db-count" style="color:var(--blue)">${db.tasks.total}</span></div>
       <div class="db-bar">${makeBar(db.tasks.primary||{}, db.tasks.total, STATUS_COLORS)}</div>
       <div class="db-breakdown">${makeChips(db.tasks.secondary.type||{}, STATUS_COLORS)}</div>
@@ -426,11 +436,12 @@ function renderDatabases(data) {
           return `<div class="db-recent-item">
             ${status ? `<span class="badge" style="color:${sc};background:${sc}15">${status}</span>` : ''}
             <span title="${title}">${title}</span>
-            <button class="task-status-btn" onclick="event.preventDefault();updateTaskStatus(${item.id}, 'Done')" style="color:${sc};border-color:${sc}30">→Done</button>
+            <button class="task-status-btn" onclick="event.stopPropagation();updateTaskStatus(${item.id}, 'Done')" style="color:${sc};border-color:${sc}30">→Done</button>
           </div>`;
         }).join('')
       }</div>` : ''}
-    </a>
+      <a class="db-open-link" href="/explorer#tasks">Open in Explorer</a>
+    </div>
     <a class="db-card" href="/explorer#logs">
       <div class="db-head"><span class="db-icon">📝</span><span class="db-name">Activity Log</span><span class="db-count" style="color:var(--cyan)">${db.activity_log.total}</span></div>
       <div class="db-bar">${makeBar(db.activity_log.primary||{}, db.activity_log.total, STATUS_COLORS)}</div>

@@ -52,6 +52,8 @@ class WebSearchTool:
         self._providers: list[SearchProvider] = []
         self._academic_provider: SemanticScholarProvider | None = None
         self._extractor: ContentExtractor = create_extractor(config.extractor)
+        self._blocked_domains: set[str] = set(config.blocked_domains)
+        self._preferred_domains: set[str] = set(config.preferred_domains)
 
         for pc in config.providers:
             if not pc.enabled:
@@ -84,6 +86,7 @@ class WebSearchTool:
             all_results.extend(batch)
 
         deduped = _dedup_results(all_results)
+        deduped = self._filter_and_boost(deduped)
         if max_results:
             deduped = deduped[:max_results]
         return deduped
@@ -110,8 +113,33 @@ class WebSearchTool:
             )
             return results
         except Exception as e:
-            logger.warning("Provider %s failed for '%s': %s", provider.name, query[:50], e)
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            if status_code == 429:
+                logger.warning(
+                    "Provider %s rate limited for '%s', skipping",
+                    provider.name, query[:50],
+                )
+            else:
+                logger.warning("Provider %s failed for '%s': %s", provider.name, query[:50], e)
             return []
+
+    def _filter_and_boost(self, results: list[SearchResult]) -> list[SearchResult]:
+        """Filter blocked domains and boost preferred domains."""
+        filtered: list[SearchResult] = []
+        for r in results:
+            if not r.url:
+                continue
+            host = urlparse(r.url).netloc.lower().removeprefix("www.")
+            # Check against blocked domains
+            if any(host == d or host.endswith(f".{d}") for d in self._blocked_domains):
+                logger.debug("Filtered blocked domain: %s", host)
+                continue
+            # Boost preferred domains
+            if any(host == d or host.endswith(f".{d}") for d in self._preferred_domains):
+                r.score += 0.3
+            filtered.append(r)
+        filtered.sort(key=lambda r: r.score, reverse=True)
+        return filtered
 
     def as_llm_tools(self) -> list[dict]:
         """Return tool definitions in Anthropic tool format for LLM function calling."""

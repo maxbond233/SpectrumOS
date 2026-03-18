@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date
 
+from spectrum.agents._parsing import extract_json_from_llm, normalize_field
 from spectrum.agents.base import AgentBase
 from spectrum.db.models import AgentTask
 from spectrum.llm.prompts import (
@@ -66,6 +68,8 @@ class FocusAgent(AgentBase):
         all_results: list[SearchResult] = []
         all_pages: dict[str, str] = {}  # url → extracted text
         max_rounds = self.search_tool._config.max_search_rounds
+        query_budget = self.search_tool._config.max_search_queries
+        queries_used = 0
 
         keywords = plan.get("keywords", [])
         academic_keywords = plan.get("academic_keywords", [])
@@ -77,6 +81,17 @@ class FocusAgent(AgentBase):
 
         for round_num in range(max_rounds):
             self.logger.info("Search round %d/%d", round_num + 1, max_rounds)
+
+            # Enforce search budget
+            remaining = query_budget - queries_used
+            if remaining <= 0:
+                self.logger.info("Search budget exhausted (%d queries used), stopping", queries_used)
+                break
+            total_kw = len(keywords) + len(academic_keywords)
+            if total_kw > remaining:
+                keywords = keywords[:max(1, remaining - len(academic_keywords))]
+                academic_keywords = academic_keywords[:max(0, remaining - len(keywords))]
+            queries_used += len(keywords) + len(academic_keywords)
 
             # Execute search
             new_results, new_pages = await self._execute_search(
@@ -108,7 +123,8 @@ class FocusAgent(AgentBase):
         response_content = await self._synthesize_sources(context, all_results, all_pages)
 
         # Parse and persist sources
-        sources = self._parse_sources(response_content, task.project_ref)
+        project_domain = project.domain if project else ""
+        sources = self._parse_sources(response_content, task.project_ref, project_domain)
 
         if not sources:
             await self.db.update_task(
@@ -152,7 +168,7 @@ class FocusAgent(AgentBase):
             messages=[{"role": "user", "content": prompt}],
         )
         try:
-            return self._extract_json(response.content, expect_type=dict)
+            return extract_json_from_llm(response.content, expect_type=dict)
         except Exception:
             self.logger.warning("Failed to parse search plan, using defaults")
             return {"keywords": [context[:100]], "academic_keywords": []}
@@ -229,7 +245,7 @@ class FocusAgent(AgentBase):
             messages=[{"role": "user", "content": prompt}],
         )
         try:
-            return self._extract_json(response.content, expect_type=dict)
+            return extract_json_from_llm(response.content, expect_type=dict)
         except Exception:
             self.logger.warning("Failed to parse evaluation, assuming sufficient")
             return {"sufficient": True, "coverage_score": 3}
@@ -277,39 +293,6 @@ class FocusAgent(AgentBase):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _extract_json(self, content: str, expect_type: type = list):
-        """Extract JSON from LLM response, handling markdown code blocks."""
-        text = content.strip()
-        # Strip markdown code fences
-        if "```" in text:
-            lines = text.split("\n")
-            inside = False
-            json_lines = []
-            for line in lines:
-                if line.strip().startswith("```"):
-                    inside = not inside
-                    continue
-                if inside:
-                    json_lines.append(line)
-            if json_lines:
-                text = "\n".join(json_lines)
-
-        # Find the JSON structure
-        if expect_type is dict:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-        else:
-            start = text.find("[")
-            end = text.rfind("]") + 1
-
-        if start >= 0 and end > start:
-            text = text[start:end]
-
-        result = json.loads(text)
-        if not isinstance(result, expect_type):
-            raise TypeError(f"Expected {expect_type}, got {type(result)}")
-        return result
-
     # ── Brief checklist builder ───────────────────────────────────────────
 
     @staticmethod
@@ -332,20 +315,50 @@ class FocusAgent(AgentBase):
             lines.append(f"  子话题: {name}（重要性: {importance}）")
         return "\n".join(lines) if len(lines) > 1 else ""
 
-    def _parse_sources(self, content: str, project_ref: int | None) -> list[dict]:
+    def _parse_sources(self, content: str, project_ref: int | None, domain: str = "") -> list[dict]:
         """Parse LLM response into source dicts."""
         try:
-            raw = self._extract_json(content, expect_type=list)
+            raw = extract_json_from_llm(content, expect_type=list)
         except (json.JSONDecodeError, TypeError):
             self.logger.warning(
                 "Failed to parse source list from LLM response: %s", content[:200]
             )
+            # Secondary fallback: split by numbered items or markdown headings
+            chunks = re.split(r"\n(?=\d+[\.\)、]|\#{1,3}\s)", content.strip())
+            sources: list[dict] = []
+            for i, chunk in enumerate(chunks):
+                chunk = chunk.strip()
+                if len(chunk) < 30:
+                    continue
+                first_line = chunk.split("\n")[0][:60].strip("# ").strip("0123456789.、) ")
+                title = (
+                    first_line
+                    if len(first_line) > 5
+                    else f"素材 {i + 1} · 课题{project_ref or '?'}"
+                )
+                sources.append({
+                    "title": title,
+                    "source_type": "web",
+                    "status": "Collected",
+                    "domain": domain,
+                    "url": "",
+                    "authors": "",
+                    "extracted_summary": chunk[:5000],
+                    "key_questions": "",
+                    "why_it_matters": "",
+                    "project_ref": project_ref,
+                    "assigned_agent": "focus",
+                })
+            if sources:
+                return sources
+            # Final fallback: single source with content-derived title
             if len(content.strip()) > 50:
                 self.logger.info("Creating fallback source from raw LLM response")
                 return [{
-                    "title": f"采集素材 — {project_ref or '未知课题'}",
+                    "title": content.strip().split("\n")[0][:60] or "未命名素材",
                     "source_type": "web",
                     "status": "Collected",
+                    "domain": domain,
                     "url": "",
                     "authors": "",
                     "extracted_summary": content[:5000],
@@ -362,11 +375,12 @@ class FocusAgent(AgentBase):
                 "title": r.get("title", "未命名素材"),
                 "source_type": r.get("source_type", ""),
                 "status": "Collected",
+                "domain": r.get("domain", domain),
                 "url": r.get("url", ""),
                 "authors": r.get("authors", ""),
-                "extracted_summary": r.get("extracted_summary", ""),
-                "key_questions": r.get("key_questions", ""),
-                "why_it_matters": r.get("why_it_matters", ""),
+                "extracted_summary": normalize_field(r.get("extracted_summary", "")),
+                "key_questions": normalize_field(r.get("key_questions", "")),
+                "why_it_matters": normalize_field(r.get("why_it_matters", "")),
                 "project_ref": project_ref,
                 "assigned_agent": "focus",
             })

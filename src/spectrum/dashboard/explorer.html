@@ -57,6 +57,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 .table th{font-size:.7rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.6px}
 .table tbody tr{cursor:pointer;transition:background .15s}
 .table tbody tr:hover{background:rgba(15,23,42,.85)}
+.table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .badge{display:inline-flex;align-items:center;justify-content:center;padding:1px 7px;border-radius:999px;font-size:.64rem;font-family:var(--mono);border:1px solid rgba(148,163,184,.4);color:var(--t2)}
 
 .status-badge{border-radius:999px;padding:1px 7px;font-size:.64rem;font-family:var(--mono)}
@@ -65,6 +66,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 .pager-btn{padding:4px 10px;border-radius:999px;border:1px solid var(--bd);background:none;color:var(--t2);font-size:.72rem;font-family:var(--mono);cursor:pointer;transition:all .15s}
 .pager-btn[disabled]{opacity:.4;cursor:not-allowed}
 .pager-btn:not([disabled]):hover{border-color:var(--bd2);color:var(--t1);background:var(--bg3)}
+a:focus-visible,button:focus-visible,select:focus-visible{
+  outline:2px solid var(--purple);
+  outline-offset:2px;
+}
 
 .detail-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem}
 .detail-back{font-size:.72rem;font-family:var(--mono);color:var(--t2);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
@@ -79,6 +84,47 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 .section-card{background:var(--bg3);border-radius:var(--r);border:1px solid var(--bd);padding:.8rem .9rem;margin-top:.7rem}
 .section-title{font-size:.78rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:.35rem}
 .section-body{font-size:.8rem;color:var(--t2);white-space:pre-wrap;line-height:1.6}
+.section-body,.meta-item-value,.log-meta{overflow-wrap:anywhere;word-break:break-word}
+
+#output-content{
+  white-space:normal;
+  word-wrap:break-word;
+  line-height:1.7;
+  padding:1rem;
+  max-width:800px;
+}
+#output-content h1,
+#output-content h2,
+#output-content h3{
+  margin-top:1.5rem;
+  margin-bottom:.5rem;
+}
+#output-content p{
+  margin-bottom:.8rem;
+}
+#output-content ul,
+#output-content ol{
+  margin-bottom:.8rem;
+  padding-left:1.5rem;
+}
+#output-content pre{
+  overflow:auto;
+  max-width:100%;
+  background:rgba(15,23,42,.9);
+  border:1px solid var(--bd);
+  border-radius:var(--r-sm);
+  padding:.7rem;
+}
+#output-content table{
+  display:block;
+  overflow-x:auto;
+  max-width:100%;
+}
+
+.source-detail .field-content{
+  white-space:pre-wrap;
+  word-wrap:break-word;
+}
 
 .timeline{display:flex;flex-direction:column;gap:.6rem;font-size:.76rem}
 .log-item{padding:.55rem .65rem;border-radius:var(--r-sm);border:1px solid var(--bd);background:rgba(15,23,42,.9)}
@@ -99,14 +145,28 @@ body{font-family:var(--sans);background:var(--bg);color:var(--t1);min-height:100
 .spinner{width:16px;height:16px;border:2px solid var(--bd);border-top-color:var(--purple);border-radius:50%;animation:spin .8s linear infinite}
 .error-box{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:var(--r);padding:1rem;text-align:center;color:var(--red);font-size:.8rem}
 
+.mobile-list{display:none}
+.mobile-card{background:rgba(15,23,42,.85);border:1px solid var(--bd);border-radius:var(--r);padding:.8rem;margin-bottom:.6rem;cursor:pointer}
+.mobile-card-title{font-size:.86rem;font-weight:500;margin-bottom:.35rem}
+.mobile-card-meta{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.3rem}
+.mobile-card-line{font-size:.72rem;color:var(--t2)}
+.mobile-card-actions{display:flex;gap:.4rem;margin-top:.5rem}
+
 @media(max-width:900px){
   .main{flex-direction:column}
-  .sidebar{width:100%;flex-direction:row;overflow-x:auto}
+  .sidebar{width:100%;flex-direction:row;overflow-x:auto;white-space:nowrap}
   .sidebar-title{border-bottom:none;margin-bottom:0;margin-right:.6rem}
+  .nav-item{flex:0 0 auto}
 }
 @media(max-width:600px){
   .layout{padding:1rem}
+  .header{flex-direction:column;align-items:flex-start;gap:.7rem}
+  .content{padding:1rem}
   .meta-grid{grid-template-columns:1fr}
+  .pagination{flex-direction:column;align-items:flex-start;gap:.5rem}
+  .table-wrap{display:none}
+  .mobile-list{display:block}
+  .pager-btn{min-height:36px;padding:8px 12px}
 }
 </style>
 </head>
@@ -143,7 +203,7 @@ const STATUS_COLORS = {
   'Done':'#10b981','Failed':'#ef4444','Archived':'#374151',
   'Collected':'#6b7280','To Read':'#3b82f6','Reading':'#f59e0b','Processed':'#10b981',
   'Seed':'#f59e0b','Growing':'#3b82f6','Stable':'#10b981',
-  '未开始':'#6b7280','进行中':'#3b82f6','完成':'#10b981',
+  '未开始':'#6b7280','进行中':'#3b82f6','待审核':'#f59e0b','完成':'#10b981',
 };
 
 const STATE = {
@@ -154,6 +214,28 @@ const STATE = {
   logs:{limit:50,offset:0,filters:{actor:'',action_type:'',target_db:''},lastItems:[]},
   reviews:{lastItems:[]},
 };
+const AGENT_KEY_TO_LABEL = {
+  prism: '棱镜',
+  focus: '聚光',
+  dispersion: '色散',
+  diffraction: '衍射',
+};
+const AGENT_LABEL_TO_KEY = {
+  '棱镜': 'prism',
+  '聚光': 'focus',
+  '色散': 'dispersion',
+  '衍射': 'diffraction',
+};
+const DYNAMIC_FILTER_POOL = {
+  sources: { status: new Set(), domain: new Set() },
+  wiki: { type: new Set(), domain: new Set(), maturity: new Set() },
+  outputs: { status: new Set(), type: new Set() },
+  tasks: { status: new Set(), agent: new Set(), type: new Set() },
+  logs: { actor: new Set(), action_type: new Set(), target_db: new Set() },
+};
+const LIST_VIEWS = new Set(['sources','wiki','outputs','tasks','logs','reviews']);
+const DETAIL_VIEWS = new Set(['source','wiki','output','task','project']);
+let LAST_LIST_VIEW = 'sources';
 
 function setActiveNav(view){
   document.querySelectorAll('.nav-item').forEach(el=>{
@@ -196,6 +278,131 @@ function timeAgo(iso){
   }catch(e){return iso;}
 }
 
+function isMobileView(){
+  return window.matchMedia('(max-width: 600px)').matches;
+}
+
+function normalizeAgentValue(value){
+  if(!value) return '';
+  return AGENT_LABEL_TO_KEY[value] || value;
+}
+
+function displayAgentValue(value){
+  if(!value) return '';
+  if(AGENT_KEY_TO_LABEL[value]) return `${AGENT_KEY_TO_LABEL[value]} (${value})`;
+  if(AGENT_LABEL_TO_KEY[value]) return `${value} (${AGENT_LABEL_TO_KEY[value]})`;
+  return value;
+}
+
+function addToDynamicPool(view, key, value){
+  if(!DYNAMIC_FILTER_POOL[view] || !DYNAMIC_FILTER_POOL[view][key]) return;
+  if(value === undefined || value === null) return;
+  const text = String(value).trim();
+  if(!text) return;
+  DYNAMIC_FILTER_POOL[view][key].add(text);
+}
+
+function appendSelectOptions(selectId, values, labelFormatter){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const existing = new Set(Array.from(sel.options).map(o => o.value));
+  const sorted = Array.from(values).sort((a,b) => a.localeCompare(b, 'zh-CN'));
+  sorted.forEach(value => {
+    if(existing.has(value)) return;
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = labelFormatter ? labelFormatter(value) : value;
+    sel.appendChild(opt);
+  });
+}
+
+function hydrateDynamicFilterOptions(view){
+  if(view === 'sources'){
+    appendSelectOptions('f-src-status', DYNAMIC_FILTER_POOL.sources.status);
+    appendSelectOptions('f-src-domain', DYNAMIC_FILTER_POOL.sources.domain);
+    if(document.getElementById('f-src-status')) document.getElementById('f-src-status').value = STATE.sources.filters.status;
+    if(document.getElementById('f-src-domain')) document.getElementById('f-src-domain').value = STATE.sources.filters.domain;
+  } else if(view === 'wiki'){
+    appendSelectOptions('f-wiki-type', DYNAMIC_FILTER_POOL.wiki.type);
+    appendSelectOptions('f-wiki-domain', DYNAMIC_FILTER_POOL.wiki.domain);
+    appendSelectOptions('f-wiki-maturity', DYNAMIC_FILTER_POOL.wiki.maturity);
+    if(document.getElementById('f-wiki-type')) document.getElementById('f-wiki-type').value = STATE.wiki.filters.type;
+    if(document.getElementById('f-wiki-domain')) document.getElementById('f-wiki-domain').value = STATE.wiki.filters.domain;
+    if(document.getElementById('f-wiki-maturity')) document.getElementById('f-wiki-maturity').value = STATE.wiki.filters.maturity;
+  } else if(view === 'outputs'){
+    appendSelectOptions('f-out-status', DYNAMIC_FILTER_POOL.outputs.status);
+    appendSelectOptions('f-out-type', DYNAMIC_FILTER_POOL.outputs.type);
+    if(document.getElementById('f-out-status')) document.getElementById('f-out-status').value = STATE.outputs.filters.status;
+    if(document.getElementById('f-out-type')) document.getElementById('f-out-type').value = STATE.outputs.filters.type;
+  } else if(view === 'tasks'){
+    appendSelectOptions('f-task-status', DYNAMIC_FILTER_POOL.tasks.status);
+    appendSelectOptions('f-task-type', DYNAMIC_FILTER_POOL.tasks.type);
+    appendSelectOptions('f-task-agent', DYNAMIC_FILTER_POOL.tasks.agent, displayAgentValue);
+    if(document.getElementById('f-task-status')) document.getElementById('f-task-status').value = STATE.tasks.filters.status;
+    if(document.getElementById('f-task-type')) document.getElementById('f-task-type').value = STATE.tasks.filters.type;
+    if(document.getElementById('f-task-agent')) document.getElementById('f-task-agent').value = STATE.tasks.filters.agent;
+  } else if(view === 'logs'){
+    appendSelectOptions('f-log-actor', DYNAMIC_FILTER_POOL.logs.actor, displayAgentValue);
+    appendSelectOptions('f-log-action', DYNAMIC_FILTER_POOL.logs.action_type);
+    appendSelectOptions('f-log-db', DYNAMIC_FILTER_POOL.logs.target_db);
+    if(document.getElementById('f-log-actor')) document.getElementById('f-log-actor').value = STATE.logs.filters.actor;
+    if(document.getElementById('f-log-action')) document.getElementById('f-log-action').value = STATE.logs.filters.action_type;
+    if(document.getElementById('f-log-db')) document.getElementById('f-log-db').value = STATE.logs.filters.target_db;
+  }
+}
+
+function buildPagination(total, limit, offset, view){
+  const start = total ? offset + 1 : 0;
+  const end = Math.min(offset + limit, total);
+  const isFirst = offset <= 0;
+  const isLast = offset + limit >= total;
+  return `
+    <div class="pagination">
+      <span>第 ${start}-${end} 条，共 ${total} 条</span>
+      <div>
+        <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('${view}',-1)">上一页</button>
+        <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('${view}',1)">下一页</button>
+      </div>
+    </div>
+  `;
+}
+
+function getHashState(){
+  const raw = location.hash.slice(1);
+  const [path, query=''] = raw.split('?');
+  const [view, id] = path.split('/');
+  const params = new URLSearchParams(query);
+  return {view, id, params};
+}
+
+function applyParamsToState(view, params){
+  const st = STATE[view];
+  if(!st) return;
+  if(st.filters){
+    Object.keys(st.filters).forEach(k => {
+      if(params.has(k)) st.filters[k] = params.get(k);
+    });
+  }
+  if(params.has('offset')) st.offset = Math.max(parseInt(params.get('offset') || '0', 10) || 0, 0);
+  if(params.has('limit')) st.limit = Math.max(parseInt(params.get('limit') || String(st.limit || 20), 10) || (st.limit || 20), 1);
+}
+
+function updateListStateUrl(view){
+  const st = STATE[view];
+  if(!st) return;
+  const params = new URLSearchParams();
+  if(st.filters){
+    Object.entries(st.filters).forEach(([k,v]) => {
+      if(v !== '' && v != null) params.set(k, v);
+    });
+  }
+  if(st.offset) params.set('offset', String(st.offset));
+  if(st.limit) params.set('limit', String(st.limit));
+  const query = params.toString();
+  const hash = `${view}${query ? `?${query}` : ''}`;
+  history.replaceState(null, '', `#${hash}`);
+}
+
 async function fetchList(endpoint, params){
   const url = new URL('/api/'+endpoint, location.origin);
   Object.entries(params||{}).forEach(([k,v])=>{ if(v!=='' && v!=null) url.searchParams.set(k,v); });
@@ -212,6 +419,7 @@ async function fetchDetail(endpoint, id){
 
 function renderList(view){
   setActiveNav(view);
+  LAST_LIST_VIEW = view;
   const content = document.getElementById('content');
   if(view==='sources'){
     const st = STATE.sources;
@@ -235,8 +443,8 @@ function renderList(view){
     `;
     document.getElementById('f-src-status').value = st.filters.status;
     document.getElementById('f-src-domain').value = st.filters.domain;
-    document.getElementById('f-src-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;renderList('sources');};
-    document.getElementById('f-src-domain').onchange = e=>{st.filters.domain=e.target.value;st.offset=0;renderList('sources');};
+    document.getElementById('f-src-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;updateListStateUrl('sources');renderList('sources');};
+    document.getElementById('f-src-domain').onchange = e=>{st.filters.domain=e.target.value;st.offset=0;updateListStateUrl('sources');renderList('sources');};
     loadSources();
   }else if(view==='wiki'){
     const st = STATE.wiki;
@@ -262,9 +470,9 @@ function renderList(view){
     document.getElementById('f-wiki-type').value = st.filters.type;
     document.getElementById('f-wiki-domain').value = st.filters.domain;
     document.getElementById('f-wiki-maturity').value = st.filters.maturity;
-    document.getElementById('f-wiki-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;renderList('wiki');};
-    document.getElementById('f-wiki-domain').onchange = e=>{st.filters.domain=e.target.value;st.offset=0;renderList('wiki');};
-    document.getElementById('f-wiki-maturity').onchange = e=>{st.filters.maturity=e.target.value;st.offset=0;renderList('wiki');};
+    document.getElementById('f-wiki-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;updateListStateUrl('wiki');renderList('wiki');};
+    document.getElementById('f-wiki-domain').onchange = e=>{st.filters.domain=e.target.value;st.offset=0;updateListStateUrl('wiki');renderList('wiki');};
+    document.getElementById('f-wiki-maturity').onchange = e=>{st.filters.maturity=e.target.value;st.offset=0;updateListStateUrl('wiki');renderList('wiki');};
     loadWiki();
   }else if(view==='outputs'){
     const st = STATE.outputs;
@@ -273,7 +481,7 @@ function renderList(view){
         <span class="filter-label">产出筛选</span>
         <select id="f-out-status" class="filter-select">
           <option value="">全部状态</option>
-          <option>未开始</option><option>进行中</option><option>完成</option>
+          <option>未开始</option><option>进行中</option><option>待审核</option><option>完成</option>
         </select>
         <select id="f-out-type" class="filter-select">
           <option value="">全部类型</option>
@@ -284,8 +492,8 @@ function renderList(view){
     `;
     document.getElementById('f-out-status').value = st.filters.status;
     document.getElementById('f-out-type').value = st.filters.type;
-    document.getElementById('f-out-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;renderList('outputs');};
-    document.getElementById('f-out-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;renderList('outputs');};
+    document.getElementById('f-out-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;updateListStateUrl('outputs');renderList('outputs');};
+    document.getElementById('f-out-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;updateListStateUrl('outputs');renderList('outputs');};
     loadOutputs();
   }else if(view==='tasks'){
     const st = STATE.tasks;
@@ -298,7 +506,14 @@ function renderList(view){
         </select>
         <select id="f-task-agent" class="filter-select">
           <option value="">全部代理</option>
-          <option>棱镜</option><option>聚光</option><option>色散</option><option>衍射</option>
+          <option value="prism">棱镜 (prism)</option>
+          <option value="focus">聚光 (focus)</option>
+          <option value="dispersion">色散 (dispersion)</option>
+          <option value="diffraction">衍射 (diffraction)</option>
+          <option value="棱镜">棱镜</option>
+          <option value="聚光">聚光</option>
+          <option value="色散">色散</option>
+          <option value="衍射">衍射</option>
         </select>
         <select id="f-task-type" class="filter-select">
           <option value="">全部类型</option>
@@ -310,9 +525,9 @@ function renderList(view){
     document.getElementById('f-task-status').value = st.filters.status;
     document.getElementById('f-task-agent').value = st.filters.agent;
     document.getElementById('f-task-type').value = st.filters.type;
-    document.getElementById('f-task-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;renderList('tasks');};
-    document.getElementById('f-task-agent').onchange = e=>{st.filters.agent=e.target.value;st.offset=0;renderList('tasks');};
-    document.getElementById('f-task-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;renderList('tasks');};
+    document.getElementById('f-task-status').onchange = e=>{st.filters.status=e.target.value;st.offset=0;updateListStateUrl('tasks');renderList('tasks');};
+    document.getElementById('f-task-agent').onchange = e=>{st.filters.agent=e.target.value;st.offset=0;updateListStateUrl('tasks');renderList('tasks');};
+    document.getElementById('f-task-type').onchange = e=>{st.filters.type=e.target.value;st.offset=0;updateListStateUrl('tasks');renderList('tasks');};
     loadTasks();
   }else if(view==='logs'){
     const st = STATE.logs;
@@ -321,7 +536,9 @@ function renderList(view){
         <span class="filter-label">日志筛选</span>
         <select id="f-log-actor" class="filter-select">
           <option value="">全部 Actor</option>
-          <option>human</option><option>棱镜</option><option>聚光</option><option>色散</option><option>衍射</option>
+          <option>human</option><option>api</option>
+          <option value="prism">prism</option><option value="focus">focus</option><option value="dispersion">dispersion</option><option value="diffraction">diffraction</option>
+          <option value="棱镜">棱镜</option><option value="聚光">聚光</option><option value="色散">色散</option><option value="衍射">衍射</option>
         </select>
         <select id="f-log-action" class="filter-select">
           <option value="">全部动作</option>
@@ -337,9 +554,9 @@ function renderList(view){
     document.getElementById('f-log-actor').value = st.filters.actor;
     document.getElementById('f-log-action').value = st.filters.action_type;
     document.getElementById('f-log-db').value = st.filters.target_db;
-    document.getElementById('f-log-actor').onchange = e=>{st.filters.actor=e.target.value;st.offset=0;renderList('logs');};
-    document.getElementById('f-log-action').onchange = e=>{st.filters.action_type=e.target.value;st.offset=0;renderList('logs');};
-    document.getElementById('f-log-db').onchange = e=>{st.filters.target_db=e.target.value;st.offset=0;renderList('logs');};
+    document.getElementById('f-log-actor').onchange = e=>{st.filters.actor=e.target.value;st.offset=0;updateListStateUrl('logs');renderList('logs');};
+    document.getElementById('f-log-action').onchange = e=>{st.filters.action_type=e.target.value;st.offset=0;updateListStateUrl('logs');renderList('logs');};
+    document.getElementById('f-log-db').onchange = e=>{st.filters.target_db=e.target.value;st.offset=0;updateListStateUrl('logs');renderList('logs');};
     loadLogs();
   }else if(view==='reviews'){
     content.innerHTML = `
@@ -348,6 +565,7 @@ function renderList(view){
       </div>
       <div id="list-area"></div>
     `;
+    updateListStateUrl('reviews');
     loadReviews();
   }
 }
@@ -374,31 +592,61 @@ async function loadReviews(){
       outputs:'Outputs',
       tasks:'Tasks',
     };
+    const viewMap = {
+      projects: 'project',
+      sources: 'source',
+      wiki_cards: 'wiki',
+      outputs: 'output',
+      tasks: 'task',
+    };
     const rows = STATE.reviews.lastItems.map(r=>{
       const c = typeColor[r.table] || '#6b7280';
       const statusColor = STATUS_COLORS[r.status] || '#6b7280';
-      return `<tr>
+      return `<tr onclick="location.hash='${viewMap[r.table] || 'sources'}/${r.id}'" style="cursor:pointer">
         <td><span class="status-badge" style="color:${c};border:1px solid ${c}40;background:${c}10">${typeLabel[r.table]||r.table}</span></td>
-        <td>${r.title||'(untitled)'}</td>
+        <td>
+          <div>${r.title||'(untitled)'}</div>
+          ${r.summary ? `<div style="font-size:.75rem;color:var(--t2);margin-top:.15rem;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.summary}</div>` : ''}
+          ${r.ai_notes ? `<div style="font-size:.7rem;color:var(--t3);margin-top:.1rem;font-style:italic;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.ai_notes}</div>` : ''}
+        </td>
         <td>${badgeHtml(r.status,statusColor)}</td>
         <td>${timeAgo(r.updated_at)}</td>
-        <td><button class="pager-btn" onclick="approveReview(${r.id}, '${r.table}')">Approve</button></td>
+        <td><button class="pager-btn" onclick="event.stopPropagation();approveReview(${r.id}, '${r.table}', this)">Approve</button></td>
       </tr>`;
     }).join('') || `<tr><td colspan="5" style="padding:.8rem;color:var(--t3)">暂无待 Review 项</td></tr>`;
+    const mobileCards = STATE.reviews.lastItems.map(r=>{
+      const c = typeColor[r.table] || '#6b7280';
+      const statusColor = STATUS_COLORS[r.status] || '#6b7280';
+      return `<div class="mobile-card" onclick="location.hash='${viewMap[r.table] || 'sources'}/${r.id}'">
+        <div class="mobile-card-meta">
+          <span class="status-badge" style="color:${c};border:1px solid ${c}40;background:${c}10">${typeLabel[r.table]||r.table}</span>
+          ${badgeHtml(r.status,statusColor)}
+        </div>
+        <div class="mobile-card-title">${r.title||'(untitled)'}</div>
+        ${r.summary ? `<div class="mobile-card-line">${r.summary}</div>` : ''}
+        ${r.ai_notes ? `<div class="mobile-card-line" style="font-size:.68rem;color:var(--t3);font-style:italic">${r.ai_notes}</div>` : ''}
+        <div class="mobile-card-actions">
+          <button class="pager-btn" onclick="event.stopPropagation();approveReview(${r.id}, '${r.table}', this)">Approve</button>
+        </div>
+      </div>`;
+    }).join('') || `<div class="error-box">暂无待 Review 项</div>`;
     area.innerHTML = `
-      <table class="table">
-        <thead>
-          <tr><th>类型</th><th>标题</th><th>状态</th><th>更新时间</th><th>操作</th></tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr><th>类型</th><th>标题</th><th>状态</th><th>更新时间</th><th>操作</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="mobile-list">${mobileCards}</div>
     `;
   }catch(e){
     area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
   }
 }
 
-async function approveReview(id, table){
+async function approveReview(id, table, btn){
   const map = {
     projects:{endpoint:'projects', body:{review_needed:false}},
     sources:{endpoint:'sources', body:{review_needed:false}},
@@ -409,6 +657,10 @@ async function approveReview(id, table){
   const cfg = map[table];
   if(!cfg) return;
   try{
+    if(btn){
+      btn.disabled = true;
+      btn.textContent = '...';
+    }
     const resp = await fetch(`/api/${cfg.endpoint}/${id}`,{
       method:'PATCH',
       headers:{'Content-Type':'application/json'},
@@ -420,6 +672,11 @@ async function approveReview(id, table){
     loadReviews();
   }catch(e){
     alert('Approve 失败: '+e.message);
+  }finally{
+    if(btn){
+      btn.disabled = false;
+      btn.textContent = 'Approve';
+    }
   }
 }
 
@@ -430,6 +687,11 @@ async function loadSources(){
   try{
     const data = await fetchList('sources/list',{...st.filters,limit:st.limit,offset:st.offset});
     st.lastItems = data.items || [];
+    st.lastItems.forEach(s => {
+      addToDynamicPool('sources', 'status', s.status);
+      addToDynamicPool('sources', 'domain', s.domain);
+    });
+    hydrateDynamicFilterOptions('sources');
     const rows = st.lastItems.map(s=>{
       const sc = STATUS_COLORS[s.status] || '#6b7280';
       return `<tr onclick="location.hash='source/${s.id}'">
@@ -442,25 +704,30 @@ async function loadSources(){
       </tr>`;
     }).join('') || `<tr><td colspan="6" style="padding:.8rem;color:var(--t3)">暂无数据</td></tr>`;
     const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
-    const start = total?offset+1:0, end = Math.min(offset+limit,total);
-    const isFirst = offset<=0;
-    const isLast = offset+limit>=total;
+    const mobileCards = st.lastItems.map(s=>{
+      const sc = STATUS_COLORS[s.status] || '#6b7280';
+      return `<div class="mobile-card" onclick="location.hash='source/${s.id}'">
+        <div class="mobile-card-meta">${badgeHtml(s.status, sc)} ${s.domain?`<span class="badge">${s.domain}</span>`:''}</div>
+        <div class="mobile-card-title">${s.title || '(untitled)'}</div>
+        <div class="mobile-card-line">类型: ${s.source_type || '-'}</div>
+        <div class="mobile-card-line">项目: ${s.project_ref ? `#${s.project_ref}` : '-'}</div>
+        <div class="mobile-card-line">创建: ${formatDate(s.created_at)}</div>
+      </div>`;
+    }).join('') || `<div class="error-box" style="text-align:left">暂无数据</div>`;
     area.innerHTML = `
-      <table class="table">
-        <thead><tr>
-          <th>Title</th><th>Status</th><th>Domain</th><th>Type</th><th>Project</th><th>Created</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="pagination">
-        <span>第 ${start}-${end} 条，共 ${total} 条</span>
-        <div>
-          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('sources',-1)">上一页</button>
-          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('sources',1)">下一页</button>
-        </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>Title</th><th>Status</th><th>Domain</th><th>Type</th><th>Project</th><th>Created</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
+      <div class="mobile-list">${mobileCards}</div>
+      ${buildPagination(total, limit, offset, 'sources')}
     `;
     st.limit = limit; st.offset = offset;
+    updateListStateUrl('sources');
   }catch(e){
     area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
   }
@@ -473,6 +740,12 @@ async function loadWiki(){
   try{
     const data = await fetchList('wiki-cards',{...st.filters,limit:st.limit,offset:st.offset});
     st.lastItems = data.items || [];
+    st.lastItems.forEach(w => {
+      addToDynamicPool('wiki', 'type', w.type);
+      addToDynamicPool('wiki', 'domain', w.domain);
+      addToDynamicPool('wiki', 'maturity', w.maturity);
+    });
+    hydrateDynamicFilterOptions('wiki');
     if(!st.lastItems.length){
       area.innerHTML = `<div class="error-box" style="text-align:left">暂无知识卡</div>`;return;
     }
@@ -503,6 +776,7 @@ async function loadWiki(){
       </div>
     `;
     st.limit = limit; st.offset = offset;
+    updateListStateUrl('wiki');
   }catch(e){
     area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
   }
@@ -515,6 +789,11 @@ async function loadOutputs(){
   try{
     const data = await fetchList('outputs',{...st.filters,limit:st.limit,offset:st.offset});
     st.lastItems = data.items || [];
+    st.lastItems.forEach(o => {
+      addToDynamicPool('outputs', 'status', o.status);
+      addToDynamicPool('outputs', 'type', o.type);
+    });
+    hydrateDynamicFilterOptions('outputs');
     const rows = st.lastItems.map(o=>{
       const sc = STATUS_COLORS[o.status] || '#6b7280';
       return `<tr onclick="location.hash='output/${o.id}'">
@@ -527,25 +806,30 @@ async function loadOutputs(){
       </tr>`;
     }).join('') || `<tr><td colspan="6" style="padding:.8rem;color:var(--t3)">暂无数据</td></tr>`;
     const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
-    const start = total?offset+1:0, end = Math.min(offset+limit,total);
-    const isFirst = offset<=0;
-    const isLast = offset+limit>=total;
+    const mobileCards = st.lastItems.map(o=>{
+      const sc = STATUS_COLORS[o.status] || '#6b7280';
+      return `<div class="mobile-card" onclick="location.hash='output/${o.id}'">
+        <div class="mobile-card-meta">${badgeHtml(o.status, sc)} ${o.type?`<span class="badge">${o.type}</span>`:''}</div>
+        <div class="mobile-card-title">${o.name || '(untitled)'}</div>
+        <div class="mobile-card-line">字数: ${o.word_count || 0}</div>
+        <div class="mobile-card-line">领域: ${o.domain || '-'}</div>
+        <div class="mobile-card-line">创建: ${formatDate(o.created_at)}</div>
+      </div>`;
+    }).join('') || `<div class="error-box" style="text-align:left">暂无数据</div>`;
     area.innerHTML = `
-      <table class="table">
-        <thead><tr>
-          <th>Name</th><th>Type</th><th>Status</th><th>Words</th><th>Domain</th><th>Created</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="pagination">
-        <span>第 ${start}-${end} 条，共 ${total} 条</span>
-        <div>
-          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('outputs',-1)">上一页</button>
-          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('outputs',1)">下一页</button>
-        </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>Name</th><th>Type</th><th>Status</th><th>Words</th><th>Domain</th><th>Created</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
+      <div class="mobile-list">${mobileCards}</div>
+      ${buildPagination(total, limit, offset, 'outputs')}
     `;
     st.limit = limit; st.offset = offset;
+    updateListStateUrl('outputs');
   }catch(e){
     area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
   }
@@ -556,8 +840,15 @@ async function loadTasks(){
   const area = document.getElementById('list-area');
   area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading tasks...</div>`;
   try{
-    const data = await fetchList('tasks/browse',{...st.filters,limit:st.limit,offset:st.offset});
+    const queryFilters = {...st.filters, agent: normalizeAgentValue(st.filters.agent)};
+    const data = await fetchList('tasks/browse',{...queryFilters,limit:st.limit,offset:st.offset});
     st.lastItems = data.items || [];
+    st.lastItems.forEach(t => {
+      addToDynamicPool('tasks', 'status', t.status);
+      addToDynamicPool('tasks', 'type', t.type);
+      addToDynamicPool('tasks', 'agent', t.assigned_agent);
+    });
+    hydrateDynamicFilterOptions('tasks');
     const rows = st.lastItems.map(t=>{
       const sc = STATUS_COLORS[t.status] || '#6b7280';
       const deps = (t.depends_on||'').split(',').filter(x=>x.trim()).map(id=>`<span class="badge" onclick="event.stopPropagation();location.hash='task/${id.trim()}'">#${id.trim()}</span>`).join(' ');
@@ -565,32 +856,38 @@ async function loadTasks(){
         <td>${t.name}</td>
         <td>${badgeHtml(t.status, sc)}</td>
         <td>${t.type||''}</td>
-        <td>${t.assigned_agent||''}</td>
+        <td>${displayAgentValue(t.assigned_agent)||''}</td>
         <td>${deps||''}</td>
         <td>${t.project_ref?`<a class="meta-link" href="#project/${t.project_ref}">#${t.project_ref}</a>`:''}</td>
         <td>${t.retry_count||0}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="7" style="padding:.8rem;color:var(--t3)">暂无数据</td></tr>`;
     const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
-    const start = total?offset+1:0, end = Math.min(offset+limit,total);
-    const isFirst = offset<=0;
-    const isLast = offset+limit>=total;
+    const mobileCards = st.lastItems.map(t=>{
+      const sc = STATUS_COLORS[t.status] || '#6b7280';
+      const deps = (t.depends_on||'').split(',').filter(x=>x.trim()).map(id=>`#${id.trim()}`).join(', ');
+      return `<div class="mobile-card" onclick="location.hash='task/${t.id}'">
+        <div class="mobile-card-meta">${badgeHtml(t.status, sc)} ${t.type?`<span class="badge">${t.type}</span>`:''} ${t.assigned_agent?`<span class="badge">${displayAgentValue(t.assigned_agent)}</span>`:''}</div>
+        <div class="mobile-card-title">${t.name || '(untitled)'}</div>
+        <div class="mobile-card-line">依赖: ${deps || '-'}</div>
+        <div class="mobile-card-line">项目: ${t.project_ref ? `#${t.project_ref}` : '-'}</div>
+        <div class="mobile-card-line">重试: ${t.retry_count || 0}</div>
+      </div>`;
+    }).join('') || `<div class="error-box" style="text-align:left">暂无数据</div>`;
     area.innerHTML = `
-      <table class="table">
-        <thead><tr>
-          <th>Name</th><th>Status</th><th>Type</th><th>Agent</th><th>Depends</th><th>Project</th><th>Retries</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="pagination">
-        <span>第 ${start}-${end} 条，共 ${total} 条</span>
-        <div>
-          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('tasks',-1)">上一页</button>
-          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('tasks',1)">下一页</button>
-        </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>Name</th><th>Status</th><th>Type</th><th>Agent</th><th>Depends</th><th>Project</th><th>Retries</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
+      <div class="mobile-list">${mobileCards}</div>
+      ${buildPagination(total, limit, offset, 'tasks')}
     `;
     st.limit = limit; st.offset = offset;
+    updateListStateUrl('tasks');
   }catch(e){
     area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
   }
@@ -601,8 +898,15 @@ async function loadLogs(){
   const area = document.getElementById('list-area');
   area.innerHTML = `<div class="loading"><div class="spinner"></div>Loading logs...</div>`;
   try{
-    const data = await fetchList('logs',{...st.filters,limit:st.limit,offset:st.offset});
+    const queryFilters = {...st.filters, actor: normalizeAgentValue(st.filters.actor)};
+    const data = await fetchList('logs',{...queryFilters,limit:st.limit,offset:st.offset});
     st.lastItems = data.items || [];
+    st.lastItems.forEach(l => {
+      addToDynamicPool('logs', 'actor', l.actor);
+      addToDynamicPool('logs', 'action_type', l.action_type);
+      addToDynamicPool('logs', 'target_db', l.target_db);
+    });
+    hydrateDynamicFilterOptions('logs');
     const logs = st.lastItems.map(l=>{
       const actorColor = l.actor==='human' ? '#e5e7eb' : '#8b5cf6';
       return `<div class="log-item">
@@ -625,20 +929,12 @@ async function loadLogs(){
       </div>`;
     }).join('') || `<div class="error-box" style="text-align:left">暂无日志</div>`;
     const total = data.total||0, limit = data.limit||st.limit, offset = data.offset||st.offset;
-    const start = total?offset+1:0, end = Math.min(offset+limit,total);
-    const isFirst = offset<=0;
-    const isLast = offset+limit>=total;
     area.innerHTML = `
       <div class="timeline">${logs}</div>
-      <div class="pagination">
-        <span>第 ${start}-${end} 条，共 ${total} 条</span>
-        <div>
-          <button class="pager-btn" ${isFirst?'disabled':''} onclick="changePage('logs',-1)">上一页</button>
-          <button class="pager-btn" ${isLast?'disabled':''} onclick="changePage('logs',1)">下一页</button>
-        </div>
-      </div>
+      ${buildPagination(total, limit, offset, 'logs')}
     `;
     st.limit = limit; st.offset = offset;
+    updateListStateUrl('logs');
   }catch(e){
     area.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
   }
@@ -650,6 +946,7 @@ function changePage(view, delta){
   const newOffset = st.offset + delta*(st.limit||20);
   if(newOffset<0) return;
   st.offset = newOffset;
+  updateListStateUrl(view);
   renderList(view);
 }
 
@@ -668,6 +965,7 @@ async function renderDetail(view,id){
       const s = await fetchDetail('sources',id);
       const sc = STATUS_COLORS[s.status] || '#6b7280';
       content.innerHTML = `
+        <div class="source-detail">
         <div class="detail-header">
           <div class="detail-back" onclick="location.hash='sources'">← 返回素材列表</div>
         </div>
@@ -682,8 +980,9 @@ async function renderDetail(view,id){
           <div><div class="meta-item-label">Created</div><div class="meta-item-value">${formatDate(s.created_at)}</div></div>
         </div>
         ${s.extracted_summary?`<div class="section-card"><div class="section-title">摘要</div><div class="section-body">${s.extracted_summary}</div></div>`:''}
-        ${s.key_questions?`<div class="section-card"><div class="section-title">关键问题</div><div class="section-body">${s.key_questions}</div></div>`:''}
-        ${s.why_it_matters?`<div class="section-card"><div class="section-title">重要性</div><div class="section-body">${s.why_it_matters}</div></div>`:''}
+        ${s.key_questions?`<div class="section-card"><div class="section-title">关键问题</div><div class="section-body field-content">${s.key_questions}</div></div>`:''}
+        ${s.why_it_matters?`<div class="section-card"><div class="section-title">重要性</div><div class="section-body field-content">${s.why_it_matters}</div></div>`:''}
+        </div>
       `;
     }catch(e){
       content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
@@ -721,6 +1020,15 @@ async function renderDetail(view,id){
     try{
       const o = await fetchDetail('outputs',id);
       const sc = STATUS_COLORS[o.status] || '#6b7280';
+      let contentText = o.content || '';
+      try{
+        const parsed = JSON.parse(contentText);
+        if(parsed && typeof parsed === 'object' && parsed.content){
+          contentText = parsed.content;
+        }
+      }catch(e){
+        // not json, keep as-is
+      }
       content.innerHTML = `
         <div class="detail-header">
           <div class="detail-back" onclick="location.hash='outputs'">← 返回产出列表</div>
@@ -744,11 +1052,12 @@ async function renderDetail(view,id){
           <div><div class="meta-item-label">Created</div><div class="meta-item-value">${formatDate(o.created_at)}</div></div>
           <div><div class="meta-item-label">Updated</div><div class="meta-item-value">${formatDate(o.updated_at)}</div></div>
         </div>
-        ${o.content?`<div class="section-card"><div class="section-title">内容</div><div id="output-content" class="section-body"></div></div>`:''}
+        ${contentText?`<div class="section-card"><div class="section-title">内容</div><div id="output-content" class="section-body"></div></div>`:''}
         ${o.ai_notes?`<div class="section-card"><div class="section-title">AI Notes</div><div class="section-body">${o.ai_notes}</div></div>`:''}
       `;
-      if(o.content && window.marked){
-        document.getElementById('output-content').innerHTML = marked.parse(o.content);
+      if(contentText && window.marked){
+        const contentEl = document.getElementById('output-content');
+        if(contentEl) contentEl.innerHTML = marked.parse(contentText);
       }
     }catch(e){
       content.innerHTML = `<div class="error-box">加载失败: ${e.message}</div>`;
@@ -772,7 +1081,7 @@ async function renderDetail(view,id){
         <div style="margin-bottom:.6rem;display:flex;gap:.4rem;align-items:center">
           ${badgeHtml(t.status, sc)}
           ${t.type?`<span class="badge">${t.type}</span>`:''}
-          ${t.assigned_agent?`<span class="badge">${t.assigned_agent}</span>`:''}
+          ${t.assigned_agent?`<span class="badge">${displayAgentValue(t.assigned_agent)}</span>`:''}
         </div>
         <div class="meta-grid">
           <div><div class="meta-item-label">Priority</div><div class="meta-item-value">${t.priority||'-'}</div></div>
@@ -793,7 +1102,7 @@ async function renderDetail(view,id){
       const sc = STATUS_COLORS[p.status] || '#6b7280';
       content.innerHTML = `
         <div class="detail-header">
-          <div class="detail-back" onclick="history.back()">← 返回</div>
+          <div class="detail-back" onclick="location.hash='${LAST_LIST_VIEW}'">← 返回</div>
         </div>
         <div class="detail-title" style="margin-bottom:.4rem">${p.name||'(untitled)'}</div>
         <div style="margin-bottom:.6rem;display:flex;gap:.4rem;align-items:center">
@@ -826,17 +1135,21 @@ async function renderDetail(view,id){
 }
 
 function route(){
-  let hash = location.hash.slice(1);
-  if(!hash){
+  const {view, id, params} = getHashState();
+  if(!view){
     location.hash = 'sources';
     return;
   }
-  const [view,id] = hash.split('/');
-  if(id){
+  if(id && DETAIL_VIEWS.has(view)){
     renderDetail(view,id);
-  }else{
-    renderList(view);
+    return;
   }
+  if(LIST_VIEWS.has(view)){
+    applyParamsToState(view, params);
+    renderList(view);
+    return;
+  }
+  location.hash = 'sources';
 }
 
 document.querySelectorAll('.nav-item').forEach(el=>{

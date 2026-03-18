@@ -66,6 +66,9 @@ class SearchConfig(BaseModel):
     ])
     extractor: ContentExtractorConfig = Field(default_factory=ContentExtractorConfig)
     max_search_rounds: int = 3
+    max_search_queries: int = 10
+    blocked_domains: list[str] = Field(default_factory=list)
+    preferred_domains: list[str] = Field(default_factory=list)
 
 
 # ── Scheduler ────────────────────────────────────────────────────────────────

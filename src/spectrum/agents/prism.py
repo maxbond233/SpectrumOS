@@ -87,6 +87,16 @@ class PrismAgent(AgentBase):
                     target_record=str(project.id),
                 )
 
+            # Step 1.5: Infer domain if empty
+            if not (project.domain or "").strip():
+                inferred_domain = await self._infer_domain(project)
+                if inferred_domain:
+                    await self.db.update_project(project.id, domain=inferred_domain)
+                    project.domain = inferred_domain
+                    self.logger.info(
+                        "Inferred domain '%s' for project %s", inferred_domain, project.name
+                    )
+
             # Step 2: Ask LLM to decompose (with brief context)
             decompose_msg = (
                 f"课题名称: {project.name}\n"
@@ -164,6 +174,28 @@ class PrismAgent(AgentBase):
         """Check project pipeline status and perform completion review."""
         events: list[str] = []
         active_projects = await self.db.list_projects(status="进行中")
+        review_projects = await self.db.list_projects(status="待审核")
+
+        # For "待审核" projects, check if all outputs have been reviewed
+        for project in review_projects:
+            outputs = await self.db.list_outputs(project_ref=project.id)
+            pending_review = [o for o in outputs if o.review_needed]
+            if not pending_review:
+                # All outputs reviewed — mark project complete
+                await self.db.update_project(
+                    project.id, status="完成", review_needed=True
+                )
+                await self.activity_logger.log(
+                    actor=self.agent_name,
+                    action_type="Update",
+                    target_db="Research Projects",
+                    description=f"课题完成: {project.name}",
+                    target_record=str(project.id),
+                    before="待审核",
+                    after="完成",
+                    needs_review=True,
+                )
+                events.append(f"project_completed:{project.id}")
 
         for project in active_projects:
             tasks = await self.db.list_tasks(project_ref=project.id)
@@ -213,7 +245,7 @@ class PrismAgent(AgentBase):
                     events.append(f"project_supplement:{project.id}")
                     continue
                 else:
-                    # Review passed or review failed to parse — mark complete
+                    # Review passed or review failed to parse
                     if review_result:
                         await self.db.update_project(
                             project.id,
@@ -222,6 +254,57 @@ class PrismAgent(AgentBase):
                                 review_result, ensure_ascii=False
                             ),
                         )
+
+            # Check if synthesis is needed (multiple outputs → create final merged output)
+            outputs = await self.db.list_outputs(project_ref=project.id)
+            has_synthesis = any("综合" in (o.name or "") for o in outputs)
+            if len(outputs) > 1 and not has_synthesis:
+                output_names = ", ".join(o.name for o in outputs)
+                await self.db.create_task(
+                    name=f"综合产出 · {project.name}",
+                    type="产出",
+                    assigned_agent="diffraction",
+                    priority=project.priority or "P2",
+                    message=(
+                        f"请将以下子课题产出合并为一篇完整的综合文稿：\n"
+                        f"已有产出: {output_names}\n"
+                        f"课题: {project.name}\n"
+                        f"要求: 统一叙事线，消除重复，补充过渡段落。"
+                    ),
+                    project_ref=project.id,
+                    status="Todo",
+                )
+                await self.activity_logger.log(
+                    actor=self.agent_name,
+                    action_type="Create",
+                    target_db="Agent Board",
+                    description=f"创建综合产出任务: {project.name}",
+                    target_record=str(project.id),
+                )
+                events.append(f"project_synthesis:{project.id}")
+                continue
+
+            # Check if outputs still need review before marking complete
+            if not outputs:
+                outputs = await self.db.list_outputs(project_ref=project.id)
+            pending_review = [o for o in outputs if o.review_needed]
+            if pending_review:
+                if project.status != "待审核":
+                    await self.db.update_project(
+                        project.id, status="待审核", review_needed=True
+                    )
+                    await self.activity_logger.log(
+                        actor=self.agent_name,
+                        action_type="Update",
+                        target_db="Research Projects",
+                        description=f"课题进入审核: {project.name} ({len(pending_review)} 个产出待审核)",
+                        target_record=str(project.id),
+                        before="进行中",
+                        after="待审核",
+                        needs_review=True,
+                    )
+                    events.append(f"project_pending_review:{project.id}")
+                continue
 
             # Mark project complete
             await self.db.update_project(
@@ -242,6 +325,29 @@ class PrismAgent(AgentBase):
         return events
 
     # ── Brief generation ─────────────────────────────────────────────────
+
+    async def _infer_domain(self, project) -> str:
+        """Infer the research domain from project name and questions."""
+        try:
+            response = await self.llm.complete(
+                agent_name=self.agent_name,
+                system="你是学科分类专家。只输出领域名称，不要输出其他内容。",
+                messages=[{"role": "user", "content": (
+                    f"课题名称: {project.name}\n"
+                    f"研究问题: {project.research_questions or '未指定'}\n"
+                    f"范围: {project.scope or '未指定'}\n\n"
+                    "请用 2-4 个字概括该课题所属的学科领域。\n"
+                    "例如：生物信息学、机器学习、量子计算、材料科学、自然语言处理\n"
+                    "只输出领域名称，不要输出其他内容。"
+                )}],
+            )
+            domain = (response.content or "").strip().strip('"').strip("'")
+            # Sanity check: domain should be short
+            if domain and len(domain) <= 20:
+                return domain
+        except Exception:
+            self.logger.warning("Failed to infer domain for project %s", project.id)
+        return ""
 
     async def _generate_brief(self, project) -> str:
         """Call LLM to generate a research brief. Returns JSON string or empty."""

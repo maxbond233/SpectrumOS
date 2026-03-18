@@ -41,7 +41,40 @@ search:
   extractor:
     provider: "jina"
     max_content_length: 20000
-  max_search_rounds: 3
+  max_search_rounds: 2
+  max_search_queries: 10
+  blocked_domains:
+    - zhihu.com
+    - csdn.net
+    - csdn.com
+    - jianshu.com
+    - baidu.com
+    - baijiahao.baidu.com
+    - 360doc.com
+    - sohu.com
+    - toutiao.com
+    - bilibili.com
+    - douban.com
+    - bokeyuan.com
+    - cnblogs.com
+    - php.cn
+  preferred_domains:
+    - arxiv.org
+    - biorxiv.org
+    - medrxiv.org
+    - nature.com
+    - science.org
+    - cell.com
+    - pnas.org
+    - nih.gov
+    - pubmed.ncbi.nlm.nih.gov
+    - github.com
+    - stackoverflow.com
+    - huggingface.co
+    - openreview.net
+    - proceedings.mlr.press
+    - distill.pub
+    - lilianweng.github.io
 
 scheduler:
   tick_interval: 30
