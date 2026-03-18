@@ -1,8 +1,9 @@
-"""Typer CLI — run, trigger, status, create-project, logs."""
+"""Typer CLI — run, trigger, status, create-project, logs, reindex."""
 
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Optional
 
 import typer
@@ -33,6 +34,18 @@ def trigger(agent: str = typer.Argument(..., help="Agent name: prism/focus/dispe
 
         setup_logging()
         settings = load_settings()
+
+        # Export .env vars to os.environ for provider initialization
+        for key, val in {
+            "CLAUDE_API_KEY": settings.claude_api_key,
+            "CLAUDE_BASE_URL": settings.claude_base_url,
+            "DEEPSEEK_API_KEY": settings.deepseek_api_key,
+            "DEEPSEEK_BASE_URL": settings.deepseek_base_url,
+            "TAVILY_API_KEY": settings.tavily_api_key,
+        }.items():
+            if val and not os.environ.get(key):
+                os.environ[key] = val
+
         init_engine(settings.database)
         await create_tables()
 

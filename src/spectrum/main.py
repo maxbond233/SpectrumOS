@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 import uvicorn
 
@@ -53,6 +54,19 @@ async def run() -> None:
     """Main async entry: init DB, build agents, start scheduler + API."""
     setup_logging()
     settings = load_settings()
+
+    # Ensure LLM env vars are available to os.environ for provider initialization
+    # pydantic-settings reads .env into Settings fields but doesn't export to os.environ
+    _env_exports = {
+        "CLAUDE_API_KEY": settings.claude_api_key,
+        "CLAUDE_BASE_URL": settings.claude_base_url,
+        "DEEPSEEK_API_KEY": settings.deepseek_api_key,
+        "DEEPSEEK_BASE_URL": settings.deepseek_base_url,
+        "TAVILY_API_KEY": settings.tavily_api_key,
+    }
+    for key, val in _env_exports.items():
+        if val and not os.environ.get(key):
+            os.environ[key] = val
 
     # Database
     init_engine(settings.database)
