@@ -260,8 +260,8 @@ async def dashboard_stats():
     for a in AGENT_DEFS:
         agent_infos.append(AgentInfo(
             **a,
-            active=a["name"] in active_agents,
-            task_count=agent_task_counts.get(a["name"], 0),
+            active=a["key"] in active_agents,
+            task_count=agent_task_counts.get(a["key"], 0),
         ))
 
     databases: dict[str, TableStats] = {}
