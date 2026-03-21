@@ -257,6 +257,13 @@ class DatabaseOps:
         tag = Tag(name=name, parent_id=parent_id, level=level, description=description)
         return await self._create(tag)
 
+    async def find_tag_by_name(self, name: str) -> Tag | None:
+        """Find a tag by exact name match."""
+        async with self._session() as session:
+            stmt = select(Tag).where(Tag.name == name)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
     async def get_tag(self, id: int) -> Tag | None:
         return await self._get_by_id(Tag, id)
 

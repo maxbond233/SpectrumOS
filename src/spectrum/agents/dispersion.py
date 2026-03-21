@@ -14,6 +14,7 @@ import re
 
 from spectrum.agents._parsing import extract_json_from_llm, normalize_field
 from spectrum.agents.base import AgentBase
+from spectrum.db.fts import upsert_fts_entry
 from spectrum.db.models import AgentTask
 from spectrum.llm.prompts import DISPERSION_SYSTEM
 
@@ -100,13 +101,17 @@ class DispersionAgent(AgentBase):
         if not cards:
             await self.db.update_task(
                 task.id,
-                ai_notes=response.content[:500] if response.content else "",
+                ai_notes=all_cards_content[:500] if all_cards_content else "",
             )
             raise RuntimeError(
-                f"未能从 LLM 响应中解析出任何知识卡片 (响应长度: {len(response.content or '')})"
+                f"未能从 LLM 响应中解析出任何知识卡片 (响应长度: {len(all_cards_content or '')})"
             )
 
+        created_cards = []  # (card_obj, card_data) pairs
         for card_data in cards:
+            # Extract and remove transient fields before DB insert
+            tags_raw = card_data.pop("_tags", [])
+            links_raw = card_data.pop("_links", [])
             created = await self.db.create_wiki_card(**card_data)
             await self.activity_logger.log(
                 actor=self.agent_name,
@@ -116,6 +121,25 @@ class DispersionAgent(AgentBase):
                 target_record=str(created.id),
             )
             events.append(f"wiki_created:{created.id}")
+            created_cards.append((created, card_data, tags_raw, links_raw))
+
+            # FTS index
+            try:
+                body = " ".join(filter(None, [
+                    card_data.get("definition", ""),
+                    card_data.get("explanation", ""),
+                    card_data.get("key_points", ""),
+                    card_data.get("example", ""),
+                ]))
+                await upsert_fts_entry(
+                    "wiki_card", created.id, card_data["concept"],
+                    body, card_data.get("domain", ""),
+                )
+            except Exception:
+                logger.warning("FTS upsert failed for card %d", created.id)
+
+        # Apply knowledge layer (tags + links)
+        await self._apply_knowledge_layer(created_cards)
 
         # Mark sources as Processed
         for s in sources:
@@ -136,6 +160,64 @@ class DispersionAgent(AgentBase):
         )
 
         return events
+
+    async def _apply_knowledge_layer(
+        self, created_cards: list[tuple],
+    ) -> None:
+        """Apply tags and concept links to newly created cards."""
+        if not created_cards:
+            return
+
+        # Build concept → card_id mapping for link resolution
+        concept_to_id: dict[str, int] = {}
+        for card, card_data, _, _ in created_cards:
+            concept_to_id[card_data["concept"]] = card.id
+
+        # Tag name → tag_id cache to avoid repeated DB lookups
+        tag_cache: dict[str, int] = {}
+
+        for card, card_data, tags_raw, links_raw in created_cards:
+            # ── Tags ──
+            for tag_path in tags_raw:
+                try:
+                    parts = [p.strip() for p in str(tag_path).split("/") if p.strip()]
+                    parts = parts[:3]  # max 3 levels
+                    parent_id = None
+                    for part in parts:
+                        cache_key = f"{parent_id}:{part}"
+                        if cache_key in tag_cache:
+                            parent_id = tag_cache[cache_key]
+                            continue
+                        existing = await self.db.find_tag_by_name(part)
+                        if existing:
+                            tag_cache[cache_key] = existing.id
+                            parent_id = existing.id
+                        else:
+                            new_tag = await self.db.create_tag(
+                                name=part, parent_id=parent_id,
+                            )
+                            tag_cache[cache_key] = new_tag.id
+                            parent_id = new_tag.id
+                    # Tag the card with the leaf tag
+                    if parent_id is not None:
+                        await self.db.tag_card(card.id, parent_id, source="ai")
+                except Exception:
+                    logger.warning("Failed to apply tag '%s' to card %d", tag_path, card.id)
+
+            # ── Links ──
+            for link in links_raw:
+                try:
+                    target = link.get("target", "")
+                    relation = link.get("relation", "相关")
+                    note = link.get("note", "")
+                    target_id = concept_to_id.get(target)
+                    if target_id and target_id != card.id:
+                        await self.db.create_card_link(
+                            from_id=card.id, to_id=target_id,
+                            relation=relation, source="ai", note=note,
+                        )
+                except Exception:
+                    logger.warning("Failed to create link from card %d to '%s'", card.id, link.get("target", "?"))
 
     async def _batch_generate_cards(
         self, task_context: str, source_text: str, concept_plan: list[dict],
@@ -240,5 +322,7 @@ class DispersionAgent(AgentBase):
                 "maturity": "Seed",
                 "project_ref": project_ref,
                 "assigned_agent": "dispersion",
+                "_tags": r.get("tags", []) or [],
+                "_links": r.get("links", []) or [],
             })
         return cards
