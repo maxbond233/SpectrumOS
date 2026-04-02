@@ -115,3 +115,33 @@ async def close_engine() -> None:
         await _engine.dispose()
         _engine = None
         _session_factory = None
+
+
+# ── FTS Index ─────────────────────────────────────────────────────────────
+
+FTS_TABLE = "fts_index"
+
+
+async def init_fts_index() -> None:
+    """Initialize FTS5 virtual table for full-text search."""
+    engine = get_engine()
+    async with engine.begin() as conn:
+        # Get list of existing virtual tables
+        result = await conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ))
+        existing_tables = {row[0] for row in result.fetchall()}
+
+        if FTS_TABLE not in existing_tables:
+            # Create FTS5 virtual table
+            await conn.execute(text(f"""
+                CREATE VIRTUAL TABLE {FTS_TABLE} USING fts5(
+                    table_type TEXT,
+                    table_id INTEGER UNINDEXED,
+                    title TEXT,
+                    content TEXT,
+                    domain TEXT DEFAULT '',
+                    tokenize='unicode61'
+                )
+            """))
+            logger.info(f"FTS5 table '{FTS_TABLE}' created")

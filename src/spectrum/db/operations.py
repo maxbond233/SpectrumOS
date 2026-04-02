@@ -14,7 +14,7 @@ from typing import Any, Sequence, TypeVar
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from spectrum.db.engine import get_session_factory
+from spectrum.db.engine import FTS_TABLE, get_session_factory
 from spectrum.db.models import (
     AgentTask,
     ActivityLog,
@@ -125,7 +125,15 @@ class DatabaseOps:
         if url and "url_hash" not in fields:
             fields["url_hash"] = hashlib.sha256(url.strip().lower().encode()).hexdigest()[:16]
         source = Source(**fields)
-        return await self._create(source)
+        result = await self._create(source)
+        # Update FTS index after commit
+        try:
+            content = " ".join(filter(None, [source.extracted_summary, source.key_questions, source.why_it_matters]))
+            if content:
+                await self.upsert_fts_entry("source", source.id, source.title, content)
+        except Exception as e:
+            logger.warning(f"Failed to update FTS index for source {source.id}: {e}")
+        return result
 
     async def find_source_by_url(self, url: str) -> Source | None:
         """Find existing source by URL hash."""
@@ -136,7 +144,16 @@ class DatabaseOps:
             return result.scalars().first()
 
     async def update_source(self, id: int, **fields: Any) -> Source | None:
-        return await self._update(Source, id, **fields)
+        obj = await self._update(Source, id, **fields)
+        if obj:
+            # Update FTS index after commit
+            try:
+                content = " ".join(filter(None, [obj.extracted_summary, obj.key_questions, obj.why_it_matters]))
+                if content:
+                    await self.upsert_fts_entry("source", obj.id, obj.title, content)
+            except Exception as e:
+                logger.warning(f"Failed to update FTS index for source {obj.id}: {e}")
+        return obj
 
     # ── Wiki Cards ───────────────────────────────────────────────────────
 
@@ -148,10 +165,27 @@ class DatabaseOps:
 
     async def create_wiki_card(self, **fields: Any) -> WikiCard:
         card = WikiCard(**fields)
-        return await self._create(card)
+        result = await self._create(card)
+        # Update FTS index after commit
+        try:
+            content = " ".join(filter(None, [card.definition, card.explanation, card.key_points, card.example]))
+            if content:
+                await self.upsert_fts_entry("wikicard", card.id, card.concept, content)
+        except Exception as e:
+            logger.warning(f"Failed to update FTS index for wikicard {card.id}: {e}")
+        return result
 
     async def update_wiki_card(self, id: int, **fields: Any) -> WikiCard | None:
-        return await self._update(WikiCard, id, **fields)
+        obj = await self._update(WikiCard, id, **fields)
+        if obj:
+            # Update FTS index after commit
+            try:
+                content = " ".join(filter(None, [obj.definition, obj.explanation, obj.key_points, obj.example]))
+                if content:
+                    await self.upsert_fts_entry("wikicard", obj.id, obj.concept, content)
+            except Exception as e:
+                logger.warning(f"Failed to update FTS index for wikicard {obj.id}: {e}")
+        return obj
 
     # ── Outputs ──────────────────────────────────────────────────────────
 
@@ -163,10 +197,27 @@ class DatabaseOps:
 
     async def create_output(self, **fields: Any) -> Output:
         output = Output(**fields)
-        return await self._create(output)
+        result = await self._create(output)
+        # Update FTS index after commit
+        try:
+            content = output.content or ""
+            if content:
+                await self.upsert_fts_entry("output", output.id, output.name, content)
+        except Exception as e:
+            logger.warning(f"Failed to update FTS index for output {output.id}: {e}")
+        return result
 
     async def update_output(self, id: int, **fields: Any) -> Output | None:
-        return await self._update(Output, id, **fields)
+        obj = await self._update(Output, id, **fields)
+        if obj:
+            # Update FTS index after commit
+            try:
+                content = obj.content or ""
+                if content:
+                    await self.upsert_fts_entry("output", obj.id, obj.name, content)
+            except Exception as e:
+                logger.warning(f"Failed to update FTS index for output {obj.id}: {e}")
+        return obj
 
     # ── Agent Tasks ──────────────────────────────────────────────────────
 
@@ -493,3 +544,49 @@ class DatabaseOps:
                     unique_edges.append(e)
 
             return {"nodes": nodes, "edges": unique_edges}
+
+    # ── FTS Indexing ─────────────────────────────────────────────────────
+
+    async def upsert_fts_entry(
+        self, table_type: str, table_id: int, title: str, content: str
+    ) -> None:
+        """Insert or replace a record in the FTS index."""
+        try:
+            async with self._session() as session:
+                # Delete existing entry first (upsert behavior)
+                await session.execute(
+                    text(f"""
+                        DELETE FROM {FTS_TABLE}
+                        WHERE table_type = :table_type AND table_id = :table_id
+                    """),
+                    {"table_type": table_type, "table_id": table_id},
+                )
+                # Insert new entry
+                await session.execute(
+                    text(f"""
+                        INSERT INTO {FTS_TABLE} (table_type, table_id, title, content)
+                        VALUES (:table_type, :table_id, :title, :content)
+                    """),
+                    {"table_type": table_type, "table_id": table_id, "title": title, "content": content},
+                )
+                await session.commit()
+        except Exception as e:
+            logger.warning(f"Failed to update FTS index for {table_type}/{table_id}: {e}")
+
+    async def search_fts(self, query: str, limit: int = 10) -> list[dict]:
+        """Search the FTS index."""
+        async with self._session() as session:
+            result = await session.execute(
+                text(f"""
+                    SELECT table_type, table_id, title, snippet({FTS_TABLE}, 3, '**', '**', '...', 32) as snippet
+                    FROM {FTS_TABLE}
+                    WHERE {FTS_TABLE} MATCH :query
+                    ORDER BY rank
+                    LIMIT :limit
+                """),
+                {"query": query, "limit": limit},
+            )
+            return [
+                {"type": row[0], "id": row[1], "title": row[2], "snippet": row[3]}
+                for row in result.fetchall()
+            ]

@@ -10,7 +10,7 @@ import uvicorn
 
 from spectrum.config import load_settings, setup_logging
 from spectrum.db.activity_log import ActivityLogger
-from spectrum.db.engine import close_engine, create_tables, init_engine
+from spectrum.db.engine import close_engine, create_tables, init_engine, init_fts_index
 from spectrum.db.operations import DatabaseOps
 from spectrum.llm.client import LLMClient
 from spectrum.orchestrator.event_bus import EventBus
@@ -72,6 +72,7 @@ async def run() -> None:
     # Database
     init_engine(settings.database)
     await create_tables()
+    await init_fts_index()
     logger.info("Database initialized")
 
     # Auto-rebuild FTS index if empty

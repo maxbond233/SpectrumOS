@@ -23,7 +23,7 @@ def trigger(agent: str = typer.Argument(..., help="Agent name: prism/focus/dispe
     """Manually trigger a single agent tick."""
     async def _trigger():
         from spectrum.config import load_settings, setup_logging
-        from spectrum.db.engine import init_engine, create_tables, close_engine
+        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
         from spectrum.db.operations import DatabaseOps
         from spectrum.db.activity_log import ActivityLogger
         from spectrum.llm.client import LLMClient
@@ -48,6 +48,7 @@ def trigger(agent: str = typer.Argument(..., help="Agent name: prism/focus/dispe
                 os.environ[key] = val
         init_engine(settings.database)
         await create_tables()
+        await init_fts_index()
 
         db = DatabaseOps()
         al = ActivityLogger(db)
@@ -74,12 +75,13 @@ def status():
     """Show system status: projects, tasks, counts."""
     async def _status():
         from spectrum.config import load_settings
-        from spectrum.db.engine import init_engine, create_tables, close_engine
+        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
         from spectrum.db.operations import DatabaseOps
 
         settings = load_settings()
         init_engine(settings.database)
         await create_tables()
+        await init_fts_index()
         db = DatabaseOps()
 
         projects = await db.list_projects()
@@ -120,7 +122,7 @@ def create_project(
     """Create a new research project."""
     async def _create():
         from spectrum.config import load_settings, setup_logging
-        from spectrum.db.engine import init_engine, create_tables, close_engine
+        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
         from spectrum.db.operations import DatabaseOps
         from spectrum.db.activity_log import ActivityLogger
 
@@ -128,6 +130,7 @@ def create_project(
         settings = load_settings()
         init_engine(settings.database)
         await create_tables()
+        await init_fts_index()
         db = DatabaseOps()
         al = ActivityLogger(db)
 
@@ -156,12 +159,13 @@ def logs(limit: int = typer.Option(20, help="Number of recent logs")):
     """Show recent activity logs."""
     async def _logs():
         from spectrum.config import load_settings
-        from spectrum.db.engine import init_engine, create_tables, close_engine
+        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
         from spectrum.db.operations import DatabaseOps
 
         settings = load_settings()
         init_engine(settings.database)
         await create_tables()
+        await init_fts_index()
         db = DatabaseOps()
 
         entries = await db.list_logs()
@@ -180,13 +184,14 @@ def reindex():
     """Rebuild the FTS5 full-text search index."""
     async def _reindex():
         from spectrum.config import load_settings, setup_logging
-        from spectrum.db.engine import init_engine, create_tables, close_engine
+        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
         from spectrum.db.fts import rebuild_fts_index
 
         setup_logging()
         settings = load_settings()
         init_engine(settings.database)
         await create_tables()
+        await init_fts_index()
 
         count = await rebuild_fts_index()
         typer.echo(f"FTS index rebuilt: {count} entries indexed.")
