@@ -49,6 +49,17 @@ Tests use `pytest` with `pytest-asyncio`; the shared fixture in `tests/conftest.
 ## Commit & Pull Request Guidelines
 Recent history uses Conventional Commit prefixes such as `feat:` and `docs:`. Keep commits scoped and descriptive, for example `feat: tighten scheduler retry handling`. Pull requests should explain the user-visible impact, call out config or schema changes, link related issues, and include screenshots when modifying `src/spectrum/dashboard/` pages or Explorer behavior.
 
+## 贡献工作流
+
+详细的分支命名、Commit 格式、PR 流程和 RFC 流程见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+核心规则：
+- 所有变更通过 PR 合入 master，禁止直接 push
+- 分支命名：`feat/`、`fix/`、`refactor/`、`docs/`、`test/`
+- Commit 格式：Conventional Commits（`feat:` / `fix:` / `docs:` / `refactor:` / `test:`）
+- 重大方向变更需先提交 RFC（`docs/rfcs/`）
+- Bug 和架构改进通过 GitHub Issues 跟踪，演进方向通过 Milestones 管理
+
 ## Adding a New Agent
 
 1. Subclass `AgentBase` in `agents/`, set `agent_name` and `agent_label`
