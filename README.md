@@ -71,6 +71,8 @@ docker compose --profile app up -d --build
 
 部署包含数据库、消息服务、对象存储、迁移、API、工作进程、调度进程和工作台。API 在容器网络监听时要求访问凭据；工作台代理在服务端注入凭据。所有对宿主机开放的端口默认绑定本机地址。对外提供工作台时，应在反向代理配置用户认证和 HTTPS。
 
+对象存储容器使用 MinIO 官方 GitHub 发布文件构建，固定版本和 SHA256，支持 amd64 与 arm64；启动迁移前检查服务健康状态。
+
 ## 配置
 
 v0.5.0 运行配置由 `SPECTRUM_` 前缀环境变量提供，定义见 `src/spectrum/runtime_config.py`。旧 `config/settings.yaml` 用于旧模块，新的入口不读取其中的调度和数据库配置。

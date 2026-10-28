@@ -25,7 +25,7 @@ jobs:
           python-version: '3.13'
       - run: uv sync --frozen --extra dev
       - run: cp .env.example .env
-      - run: docker compose up -d --wait postgres redis storage
+      - run: docker compose up -d --build --wait postgres redis storage
       - run: uv run spectrum migrate
       - run: uv run spectrum run > api.log 2>&1 &
       - run: uv run spectrum worker > worker.log 2>&1 &
