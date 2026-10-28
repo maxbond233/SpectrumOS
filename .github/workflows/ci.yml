@@ -27,8 +27,8 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose up -d --build --wait postgres redis storage
       - run: uv run spectrum migrate
-      - run: uv run spectrum run > api.log 2>&1 &
-      - run: uv run spectrum worker > worker.log 2>&1 &
+      - run: .venv/bin/spectrum run > api.log 2>&1 &
+      - run: .venv/bin/spectrum worker > worker.log 2>&1 &
       - run: curl --retry 20 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:8078/api/health
       - run: uv run pytest checks/ -v
       - uses: actions/upload-artifact@v4
