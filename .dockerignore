@@ -1,0 +1,11 @@
+.git
+.env
+.venv
+.work
+.claude
+node_modules
+frontend
+data
+logs
+__pycache__
+*.pyc

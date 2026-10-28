@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spectrum-os"
-version = "0.4.0"
-description = "光谱 OS — SQLite-backed multi-agent knowledge pipeline"
+version = "0.5.0"
+description = "光谱 OS — 持久化科研工作流与原文证据管理"
 requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy[asyncio]>=2.0.30",
@@ -21,6 +21,20 @@ dependencies = [
     "tavily-python>=0.5.0",
     "pyyaml>=6.0",
     "markdown>=3.5",
+    "langgraph>=1,<2",
+    "langgraph-checkpoint-postgres>=3,<4",
+    "psycopg[binary,pool]>=3.2,<4",
+    "celery[redis]>=5.5,<6",
+    "alembic>=1.15,<2",
+    "pgvector>=0.4,<1",
+    "boto3>=1.35,<2",
+    "jieba>=0.42,<1",
+    "fastembed>=0.7,<1",
+    "python-dotenv>=1,<2",
+    "beautifulsoup4>=4.12,<5",
+    "langfuse>=3,<4",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +42,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.7.0",
+    "playwright>=1.50",
 ]
 pdf = [
     "weasyprint>=60",
@@ -41,6 +56,7 @@ packages = ["src/spectrum"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
 [tool.ruff]
