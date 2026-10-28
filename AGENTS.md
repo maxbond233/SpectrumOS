@@ -1,75 +1,70 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-Core code lives in `src/spectrum/`. Use `agents/` for agent implementations, `orchestrator/` for scheduling and pipeline flow, `db/` for SQLAlchemy models and operations, `api/` for FastAPI routes and schemas, `llm/` for provider/client code, and `tools/` for search and content extraction. Static dashboard assets live in `src/spectrum/dashboard/`. Tests are under `tests/`, currently split by area such as `tests/test_db/` and `tests/test_orchestrator/`. Runtime configuration is stored in `config/settings.yaml`; keep secrets in `.env`, not in source control.
+## 项目目录
 
-## Build, Test, and Development Commands
-Install locally with `pip install -e ".[dev]"`. Start the full app with `spectrum run` or `python -m spectrum.main`; this launches the scheduler and FastAPI server on port `8078`. Use `pytest -v` for the full test suite, `pytest tests/test_db/ -v` for a focused run, and `pytest tests/test_db/test_operations.py::test_create_and_get_project -v` for a single test. Lint with `ruff check src/ tests/` and format with `ruff format src/ tests/`.
+核心 Python 代码位于 `src/spectrum/`。v0.5.0 的 API 入口为 `api/research.py`，运行流程位于 `orchestrator/workflow.py`，运行服务与工作进程分别为 `orchestrator/service.py` 和 `orchestrator/worker.py`。数据库模型与会话位于 `db/research.py`、`db/runtime.py`；模型调用位于 `llm/research.py`；知识检索与对象存储位于 `tools/knowledge.py`、`tools/storage.py`。
 
-## Architecture
+Next.js、React、TypeScript 工作台位于 `frontend/`。Alembic 迁移位于 `migrations/`，真实服务集成检查位于 `checks/`。旧 `agents/`、调度器、静态 dashboard 和 `tests/` 保留为历史模块，新运行入口不使用旧调度机制。
 
-SQLite-backed multi-agent knowledge pipeline. 4 agents process research projects through a linear pipeline: 课题 → 采集 → 分析 → 产出.
+新运行配置由 `runtime_config.py` 中的 `SPECTRUM_` 环境变量提供。密钥保存在 `.env`，不得提交。中间文件写入已忽略的 `.work/`。
 
-**Data flow:** `main.py` initializes everything — DB engine, LLM client, agents, scheduler, FastAPI — then runs scheduler + API concurrently via `asyncio.gather`.
+## 安装、启动与检查
 
-**Agent tick lifecycle** (`agents/base.py`): Scheduler calls `agent.tick()` every 30s. Base tick queries Agent Board for `status=Todo` tasks assigned to this agent, transitions each through `Todo → Doing → process_task() → Done`. Errors increment `retry_count`; after 3 failures task is marked `Failed` with `review_needed=True`. Prism overrides `tick()` to also scan for new projects and check pipeline progress.
+```bash
+uv sync --extra dev --frozen
+docker compose up -d postgres redis storage
+uv run spectrum migrate
+```
 
-**Dependency chain:** Prism decomposes projects into chained tasks (采集→分析→产出). Downstream tasks start as `Waiting` with `depends_on` referencing comma-separated upstream task IDs. Scheduler calls `db.resolve_dependencies()` each tick to unlock `Waiting → Todo` when all deps are `Done`.
+API、worker 和 beat 分别启动：`uv run spectrum run`、`uv run spectrum worker`、`uv run spectrum beat`。API 默认监听本机 8078 端口。前端执行 `npm ci --prefix frontend`、`npm run build --prefix frontend` 和 `npm run start --prefix frontend`，默认监听本机 3000 端口。
 
-**Project status flow:** 未开始 → 进行中 → 待审核 → 完成. Projects enter "待审核" when all tasks are done but outputs still have `review_needed=True`. Projects only transition to "完成" after all outputs are reviewed. If multiple outputs exist, Prism creates a synthesis task before marking complete.
+真实服务检查使用 `uv run pytest checks/ -v`，需要已启动 PostgreSQL、Redis、S3、API 和 worker。前端检查使用 `npm run typecheck --prefix frontend` 和 `npm run build --prefix frontend`。Python 使用 Ruff 检查；修改后的模块必须通过检查。完整验证边界见 `docs/v0.5.0-validation.md`。
 
-**LLM protocol** (`llm/provider.py`): Abstract `LLMProvider` with `OpenAICompatProvider` implementation (handles Claude, DeepSeek, Qwen via OpenAI-compatible endpoints). `LLMClient` routes to per-agent providers based on `config/settings.yaml` — supports per-agent model/key/temperature overrides.
+## 架构
 
-**Config** (`config.py`): `load_settings()` merges `config/settings.yaml` (structured config) with `.env` (secrets) via pydantic-settings. Includes backward-compat migration for old search config format.
+研究流程：简报 → 简报审核 → 采集与覆盖度评估 → 知识提炼 → 大纲 → 大纲审核 → 逐章节生成 → 审阅 → 文稿审核 → 产出。
 
-**Multi-provider search** (`tools/`): `WebSearchTool` coordinates 4 search providers (Tavily, SerpAPI, Semantic Scholar, Perplexity) — concurrent execution, URL dedup with score boosting, domain blocklist/preferred-list filtering. Content extraction via Jina Reader API with regex fallback. Configured in `settings.yaml` under `search.providers`, `search.blocked_domains`, and `search.preferred_domains`.
+- LangGraph 管理节点、条件分支和人工暂停，PostgreSQL 保存检查点。
+- PostgreSQL 事务 outbox 与 Celery/Redis 分发研究运行，会话锁限制同一运行重复执行。
+- 研究运行状态包括 `queued`、`running`、`waiting_review`、`completed`、`failed`、`cancelled`。同一课题同时只能存在一个活动运行。
+- 人工审核必须携带当前 revision。确认内容保存独立版本，审核决定与阶段绑定。
+- 模型调用在发送前预留预算，记录实际 Token、耗时和按配置单价计算的费用。结果未知的请求禁止自动重复发送。
+- Tavily 负责搜索；Jina Reader 提取正文。材料进入对象存储及版本化片段表，使用本地 512 维嵌入模型、jieba 与 PostgreSQL 全文检索。
+- 知识主张通过证据关系指向原文片段。引句必须完全匹配原文；文稿引用限定为本次运行的主张。
+- Next.js 服务端代理注入 API 凭据，浏览器通过 SSE 读取进度。非本机 API 监听必须配置访问凭据。
 
-**Focus agent 4-stage pipeline** (`agents/focus.py`): Code-driven, not LLM tool-loop. `_plan_search()` (LLM plans keywords) → `_execute_search()` (code runs multi-provider search + page extraction) → `_evaluate_results()` (LLM scores coverage, suggests supplements) → `_synthesize_sources()` (LLM produces structured records). Iterates up to `max_search_rounds` with a total query budget of `max_search_queries`.
+## 数据库
 
-**Shared parsing utilities** (`agents/_parsing.py`): `extract_json_from_llm()` handles markdown code fences, trailing commas, and type validation. `normalize_field()` converts list/dict values to readable text. Used by focus, dispersion, and diffraction agents.
+`db/models.py` 保留课题、来源、知识卡、产出、旧任务、审计、标签和知识卡关系。`db/research.py` 增加研究运行、outbox、节点执行、原文版本、片段、主张、证据、文稿版本、审核和调用记录。
 
-## Database
+结构变更通过 Alembic 管理。SQLite 导入工具仅从原始文件读取数据，要求目标业务表为空，保留主键并检查数量与数据库约束。
 
-6 SQLAlchemy ORM tables in `db/models.py`: `ResearchProject`, `Source`, `WikiCard`, `Output`, `AgentTask`, `ActivityLog`. Tests use in-memory SQLite (`conftest.py` provides a fresh `db` fixture per test).
+## 约定
 
-## Key Conventions
+- 不硬删除研究记录，使用归档状态。
+- 所有业务修改在事务内写入审计，调用 `db/runtime.py` 的 `audit()`；标题格式为 `动作｜目标库｜说明`。
+- 状态或优先级修改设置审核标记；人工确认与系统执行分别记录操作者。
+- 来源、知识卡、产出和运行保持课题关联；领域由课题输入传播。
+- 人工修改保留版本，AI 输出不得覆盖已确认内容。
+- Python 兼容 3.11+，使用 4 个空格、类型提示及 `snake_case` / `PascalCase` 命名，行宽目标 100。
+- 直接导入依赖，错误在发生位置终止，不做静默降级。
+- 验证连接真实服务并使用真实材料，不使用 mock 或虚构模型响应。
 
-- **No hard deletes** — `db/operations.py` intentionally has no delete methods. Archive via status fields instead.
-- **All writes logged** — Every DB write should be recorded in `activity_log` table. Use `ActivityLogger.log()` or the `@logged` decorator. Title format: `"动作｜目标库｜说明"`.
-- **Review needed** — Status/priority changes auto-set `review_needed=True` for human review.
-- **Project-driven** — All sources, wiki cards, outputs, and tasks reference a `project_ref`. Domain is inferred by Prism and propagated to all downstream entities.
-- **Field write isolation** — AI writes `ai_notes`, `assigned_agent`; humans write `name`, `status`, `priority`.
+## 扩展运行流程
 
-## Coding Style & Naming Conventions
-Target Python 3.11+ and keep code compatible with the `src/` layout. Ruff enforces a `100`-character line length; use 4-space indentation and type hints for new or modified functions. Follow existing naming patterns: `snake_case` for modules/functions, `PascalCase` for classes, and clear agent names such as `prism`, `focus`, `dispersion`, and `diffraction`. Prefer small async functions in I/O-heavy paths. Do not add hard-delete database helpers; this repository archives via status fields instead.
-
-## Testing Guidelines
-Tests use `pytest` with `pytest-asyncio`; the shared fixture in `tests/conftest.py` provisions a fresh in-memory SQLite database per test. Name new tests `test_<behavior>.py` and keep them near the relevant subsystem. Add regression coverage for database writes, scheduler transitions, and API behavior when you change those areas.
-
-## Commit & Pull Request Guidelines
-Recent history uses Conventional Commit prefixes such as `feat:` and `docs:`. Keep commits scoped and descriptive, for example `feat: tighten scheduler retry handling`. Pull requests should explain the user-visible impact, call out config or schema changes, link related issues, and include screenshots when modifying `src/spectrum/dashboard/` pages or Explorer behavior.
+1. 在 `orchestrator/contracts.py` 定义经过校验的输入和模型输出。
+2. 在 `orchestrator/workflow.py` 实现节点，纳入预算、幂等和证据约束。
+3. 在 `build_graph()` 注册节点、分支与审核关系。
+4. 结构变更增加迁移；配置变更更新 `.env.example` 与 README。
+5. 使用真实服务核验失败、恢复、审核版本和审计行为。
 
 ## 贡献工作流
 
-详细的分支命名、Commit 格式、PR 流程和 RFC 流程见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+详细流程见 `CONTRIBUTING.md`。
 
-核心规则：
-- 所有变更通过 PR 合入 master，禁止直接 push
-- 分支命名：`feat/`、`fix/`、`refactor/`、`docs/`、`test/`
-- Commit 格式：Conventional Commits（`feat:` / `fix:` / `docs:` / `refactor:` / `test:`）
-- 重大方向变更需先提交 RFC（`docs/rfcs/`）
-- Bug 和架构改进通过 GitHub Issues 跟踪，演进方向通过 Milestones 管理
-
-## Adding a New Agent
-
-1. Subclass `AgentBase` in `agents/`, set `agent_name` and `agent_label`
-2. Implement `async process_task(self, task: AgentTask) -> list[str]`
-3. Register in `main.py:build_agents()` factory dict
-4. Add to `config/settings.yaml` under `agents.enabled` and optionally `llm.agents`
-
-## Adding a New Search Provider
-
-1. Subclass `SearchProvider` in `tools/search_providers.py`, set `name`
-2. Implement `async search(self, query, max_results) -> list[SearchResult]`
-3. Add to `_PROVIDER_MAP` in the same file
-4. Add config entry in `settings.yaml` under `search.providers`
+- 所有变更通过 PR 合入 master，禁止直接 push。
+- 分支前缀：`feat/`、`fix/`、`refactor/`、`docs/`、`test/`。
+- 提交使用 Conventional Commits，描述使用中文，保持职责明确。
+- 重大方向变更先提交 `docs/rfcs/` 下的 RFC。
+- Bug 和架构改进通过 GitHub Issues 跟踪，演进方向通过 Milestones 管理。
+- PR 说明用户可见变化、配置与迁移影响、验证结果和关联 Issue；界面修改提供实际截图。

@@ -1,204 +1,80 @@
-"""Typer CLI — run, trigger, status, create-project, logs, reindex."""
+from pathlib import Path
 
-from __future__ import annotations
-
-import asyncio
-import os
-from typing import Optional
-
+import httpx
 import typer
+from alembic import command
+from alembic.config import Config
+from langgraph.checkpoint.postgres import PostgresSaver
 
-app = typer.Typer(name="spectrum", help="光谱 OS — Multi-agent knowledge pipeline")
+from spectrum.runtime_config import runtime_settings
 
-
-@app.command()
-def run():
-    """Start the scheduler + API server."""
-    from spectrum.main import main as run_main
-    run_main()
+app = typer.Typer(help="光谱 OS 研究工作台")
 
 
 @app.command()
-def trigger(agent: str = typer.Argument(..., help="Agent name: prism/focus/dispersion/diffraction")):
-    """Manually trigger a single agent tick."""
-    async def _trigger():
-        from spectrum.config import load_settings, setup_logging
-        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
-        from spectrum.db.operations import DatabaseOps
-        from spectrum.db.activity_log import ActivityLogger
-        from spectrum.llm.client import LLMClient
-        from spectrum.tools.web_search import WebSearchTool
-        from spectrum.orchestrator.event_bus import EventBus
-        from spectrum.orchestrator.scheduler import Scheduler
-        from spectrum.main import build_agents
-
-        setup_logging()
-        settings = load_settings()
-
-        # Export .env vars to os.environ for provider initialization
-        for key, val in {
-            "CLAUDE_API_KEY": settings.claude_api_key,
-            "CLAUDE_BASE_URL": settings.claude_base_url,
-            "DEEPSEEK_API_KEY": settings.deepseek_api_key,
-            "DEEPSEEK_BASE_URL": settings.deepseek_base_url,
-            "TAVILY_API_KEY": settings.tavily_api_key,
-            "SERPAPI_API_KEY": settings.serpapi_api_key,
-        }.items():
-            if val and not os.environ.get(key):
-                os.environ[key] = val
-        init_engine(settings.database)
-        await create_tables()
-        await init_fts_index()
-
-        db = DatabaseOps()
-        al = ActivityLogger(db)
-        llm = LLMClient(settings.llm)
-        search = WebSearchTool(settings.search)
-        agents = build_agents(db, llm, al, search, settings.agents.enabled)
-        bus = EventBus()
-        scheduler = Scheduler(agents=agents, db=db, event_bus=bus)
-
-        try:
-            events = await scheduler.trigger_agent(agent)
-            if events:
-                typer.echo(f"Events: {events}")
-            else:
-                typer.echo("No events produced.")
-        finally:
-            await close_engine()
-
-    asyncio.run(_trigger())
+def run() -> None:
+    from spectrum.main import main
+    main()
 
 
 @app.command()
-def status():
-    """Show system status: projects, tasks, counts."""
-    async def _status():
-        from spectrum.config import load_settings
-        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
-        from spectrum.db.operations import DatabaseOps
+def migrate() -> None:
+    command.upgrade(Config("alembic.ini"), "head")
+    with PostgresSaver.from_conn_string(runtime_settings().postgres_dsn) as saver:
+        saver.setup()
+    from spectrum.tools.storage import initialize_storage
+    initialize_storage()
+    typer.echo("数据库、检查点和对象存储初始化完成")
 
-        settings = load_settings()
-        init_engine(settings.database)
-        await create_tables()
-        await init_fts_index()
-        db = DatabaseOps()
 
-        projects = await db.list_projects()
-        tasks = await db.list_tasks()
-        sources = await db.list_sources()
-        wiki_cards = await db.list_wiki_cards()
-        outputs = await db.list_outputs()
+@app.command("import-sqlite")
+def import_sqlite(path: Path) -> None:
+    from spectrum.db.migrate_legacy import migrate_sqlite
+    typer.echo(migrate_sqlite(path))
 
-        typer.echo("=== 光谱 OS Status ===")
-        typer.echo(f"Projects:   {len(projects)}")
-        for p in projects:
-            typer.echo(f"  [{p.status}] {p.name} ({p.priority})")
 
-        typer.echo(f"\nTasks:      {len(tasks)}")
-        status_counts: dict[str, int] = {}
-        for t in tasks:
-            status_counts[t.status] = status_counts.get(t.status, 0) + 1
-        for s, c in sorted(status_counts.items()):
-            typer.echo(f"  {s}: {c}")
+@app.command()
+def worker() -> None:
+    from spectrum.orchestrator.worker import celery_app
+    celery_app.worker_main(["worker", "--loglevel=INFO", "--pool=solo"])
 
-        typer.echo(f"\nSources:    {len(sources)}")
-        typer.echo(f"Wiki Cards: {len(wiki_cards)}")
-        typer.echo(f"Outputs:    {len(outputs)}")
 
-        await close_engine()
+@app.command()
+def beat() -> None:
+    from spectrum.orchestrator.worker import celery_app
+    Path(".work").mkdir(exist_ok=True)
+    celery_app.Beat(loglevel="INFO", schedule=".work/celerybeat-schedule").run()
 
-    asyncio.run(_status())
+
+def request(method: str, path: str, **kwargs):
+    settings = runtime_settings()
+    token = settings.api_token.get_secret_value()
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    response = httpx.request(method, f"http://127.0.0.1:{settings.port}/api/{path}",
+                             headers=headers, timeout=30, trust_env=False, **kwargs)
+    response.raise_for_status()
+    return response.json()
+
+
+@app.command()
+def status() -> None:
+    typer.echo(request("GET", "runs"))
 
 
 @app.command("create-project")
-def create_project(
-    name: str = typer.Argument(..., help="Project name"),
-    domain: str = typer.Option("", help="Domain"),
-    questions: str = typer.Option("", help="Research questions"),
-    output_type: str = typer.Option("综述", help="Output type"),
-    priority: str = typer.Option("P2", help="Priority: P1/P2/P3"),
-):
-    """Create a new research project."""
-    async def _create():
-        from spectrum.config import load_settings, setup_logging
-        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
-        from spectrum.db.operations import DatabaseOps
-        from spectrum.db.activity_log import ActivityLogger
-
-        setup_logging()
-        settings = load_settings()
-        init_engine(settings.database)
-        await create_tables()
-        await init_fts_index()
-        db = DatabaseOps()
-        al = ActivityLogger(db)
-
-        project = await db.create_project(
-            name=name,
-            domain=domain,
-            research_questions=questions,
-            output_type=output_type,
-            priority=priority,
-        )
-        await al.log(
-            actor="cli",
-            action_type="Create",
-            target_db="Research Projects",
-            description=f"CLI 创建课题: {name}",
-            target_record=str(project.id),
-        )
-        typer.echo(f"Created project #{project.id}: {name}")
-        await close_engine()
-
-    asyncio.run(_create())
+def create_project(name: str, questions: str, domain: str = "", priority: str = "P2") -> None:
+    typer.echo(request("POST", "projects", json={"name": name, "research_questions": questions,
+                                                "domain": domain, "priority": priority}))
 
 
 @app.command()
-def logs(limit: int = typer.Option(20, help="Number of recent logs")):
-    """Show recent activity logs."""
-    async def _logs():
-        from spectrum.config import load_settings
-        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
-        from spectrum.db.operations import DatabaseOps
-
-        settings = load_settings()
-        init_engine(settings.database)
-        await create_tables()
-        await init_fts_index()
-        db = DatabaseOps()
-
-        entries = await db.list_logs()
-        for entry in entries[:limit]:
-            ts = entry.created_at.strftime("%m-%d %H:%M") if entry.created_at else "?"
-            review = " ⚠️" if entry.needs_review else ""
-            typer.echo(f"[{ts}] {entry.title}{review}")
-
-        await close_engine()
-
-    asyncio.run(_logs())
+def trigger(project_id: int) -> None:
+    typer.echo(request("POST", f"projects/{project_id}/runs", json={}))
 
 
 @app.command()
-def reindex():
-    """Rebuild the FTS5 full-text search index."""
-    async def _reindex():
-        from spectrum.config import load_settings, setup_logging
-        from spectrum.db.engine import init_engine, create_tables, close_engine, init_fts_index
-        from spectrum.db.fts import rebuild_fts_index
-
-        setup_logging()
-        settings = load_settings()
-        init_engine(settings.database)
-        await create_tables()
-        await init_fts_index()
-
-        count = await rebuild_fts_index()
-        typer.echo(f"FTS index rebuilt: {count} entries indexed.")
-
-        await close_engine()
-
-    asyncio.run(_reindex())
+def logs() -> None:
+    typer.echo(request("GET", "logs"))
 
 
 if __name__ == "__main__":

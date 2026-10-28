@@ -1,264 +1,127 @@
-# 光谱 OS · Spectrum OS
+# 光谱 OS · SpectrumOS 0.5.0
 
-> v0.3.0 — SQLite-backed multi-agent knowledge pipeline
+围绕科研课题运行资料采集、知识提炼与文稿生成。研究简报、大纲和文稿分别经过确认，研究结果可追溯至版本化原文片段。
 
-4 个 AI 代理按「课题 → 采集 → 分析 → 产出」流水线协作，通过 Agent Board 异步交接任务，所有操作记录到 Activity Log。内置 Dashboard 总控台与 Explorer 数据浏览器。
+## 研究流程
 
-## 架构
-
-```
-Kuro ──→ Research Projects ──→ 🔮 棱镜（拆解+调度）
-                                   │
-                         ┌─────────┼─────────┐
-                         ▼         ▼         ▼
-                      Sources    Wiki     Outputs
-                      💠 聚光   🌈 色散   🌊 衍射
-                       采集       分析       产出
-                         │         │         │
-                         └─────────┼─────────┘
-                                   ▼
-                            Agent Board
-                          （任务调度+交接）
-                                   │
-                                   ▼
-                           Activity Log
-                           （全程审计）
+```mermaid
+flowchart LR
+    A[课题] --> B[研究简报]
+    B --> C[确认简报]
+    C --> D[检索与采集]
+    D --> E[覆盖度评估]
+    E -->|需要补充且预算允许| D
+    E --> F[知识卡与证据]
+    F --> G[确认大纲]
+    G --> H[逐章节生成与审阅]
+    H --> I[确认文稿]
+    I --> J[版本化产出]
 ```
 
-### 代理职责
+LangGraph 管理节点、分支和人工暂停。PostgreSQL 保存业务数据及工作流检查点。Celery/Redis 分发运行，事务 outbox 与 PostgreSQL 会话锁防止重复执行。
 
-| 代理 | 角色 | 说明 |
-|------|------|------|
-| 🔮 棱镜 | 协调器 | 扫描新课题 → 拆解为任务链 → 监控流水线进度 |
-| 💠 聚光 | 采集器 | 多源联网搜索 → 提取正文 → 创建 Sources 记录 |
-| 🌈 色散 | 分析器 | 读取素材 → 提炼概念 → 创建 Wiki 知识卡 |
-| 🌊 衍射 | 产出器 | 读取知识卡 → 合成文稿 → 创建 Outputs 记录 |
+## 功能
 
-### 任务依赖链
+- 课题、研究运行、节点、审核分别保存状态；支持取消运行、失败后恢复检查点。
+- 简报、大纲和文稿可编辑、预览并查看修改差异；人工修改保存为独立版本。
+- 素材版本、原文片段、知识主张和文稿引用通过数据库关系关联。
+- 中文 jieba 分词、PostgreSQL 全文检索和 pgvector 向量检索结合排名，限定研究领域。
+- 使用本地 `BAAI/bge-small-zh-v1.5` 嵌入模型，维度为 512。
+- 通过 Tavily 检索资料；缺少正文时使用 Jina Reader 提取。模型结果使用 Pydantic 严格校验。
+- 调用前预留模型费用，保存实际 Token、耗时和估算费用；支持次数、搜索数量、材料数量、轮次和执行时间预算。
+- 原文和文稿按内容哈希保存到 S3 兼容对象存储。
+- Next.js 工作台通过 SSE 接收运行进度，提供材料输入、知识浏览、审核、日志与 Markdown 导出。
+- 支持 OpenTelemetry 导出及可选 Langfuse 观测。
 
-棱镜创建任务时自动建立链式依赖：
+## 本机启动
 
-```
-Task A (采集, 聚光, Status=Todo)
-Task B (分析, 色散, Status=Waiting, Depends On=A)
-Task C (产出, 衍射, Status=Waiting, Depends On=B)
-```
-
-调度器每个 tick（30s）检查：若依赖任务全部 Done，则 Waiting → Todo。
-
-## 功能亮点
-
-- **Dashboard 总控台** — 代理状态、6 库统计、最近活动，一屏总览（`/`）
-- **Explorer 数据浏览器** — 分页浏览 Sources / Wiki Cards / Outputs / Tasks / Logs，支持筛选与详情查看（`/explorer`）
-- **Review 审批系统** — AI 变更自动标记 `review_needed`，统一审批队列 `/api/reviews`
-- **Output 发布** — Markdown 下载 + HTML 渲染预览，支持打印样式
-- **多源搜索** — 4 个搜索 provider 并发执行，URL 去重 + 分数加权，Jina Reader 正文提取
-- **人工干预** — 所有核心表支持 PATCH 端点，手动修正状态/优先级
-
-## 技术栈
-
-- Python 3.11+, asyncio
-- SQLite + SQLAlchemy 2.x async + aiosqlite
-- OpenAI 兼容接口 (Claude / DeepSeek / Qwen)
-- FastAPI + Uvicorn (API + Web UI, 端口 8078)
-- Typer (CLI)
-- 搜索: Tavily / SerpAPI / Semantic Scholar / Perplexity
-- 正文提取: Jina Reader API + regex fallback
-- Markdown 渲染: `markdown` (tables, fenced_code, toc)
-- httpx, pydantic-settings, tenacity, PyYAML
-
-## 项目结构
-
-```
-src/spectrum/
-├── main.py                # 入口：调度器 + FastAPI 并行启动
-├── cli.py                 # CLI: run / trigger / status / create-project / logs
-├── config.py              # Pydantic Settings (YAML + .env)
-├── _version.py            # 版本号 (importlib.metadata)
-│
-├── db/                    # 数据层 (SQLite)
-│   ├── engine.py          # 异步引擎 + session 工厂
-│   ├── models.py          # 6 张表的 ORM 模型
-│   ├── operations.py      # CRUD（无 delete — 铁律）
-│   └── activity_log.py    # 审计日志记录器 + @logged 装饰器
-│
-├── llm/                   # LLM 集成
-│   ├── provider.py        # ABC + OpenAICompatProvider
-│   ├── client.py          # 统一客户端（按代理选 provider）
-│   └── prompts.py         # 各代理系统提示词
-│
-├── agents/                # 代理实现
-│   ├── base.py            # AgentBase — tick/process_task 生命周期
-│   ├── prism.py           # 🔮 棱镜
-│   ├── focus.py           # 💠 聚光
-│   ├── dispersion.py      # 🌈 色散
-│   └── diffraction.py     # 🌊 衍射
-│
-├── tools/
-│   ├── web_search.py      # 多源搜索协调器 (URL 去重 + 分数加权)
-│   ├── search_providers.py # Tavily / SerpAPI / Semantic Scholar / Perplexity
-│   └── content_extractor.py # Jina Reader + regex fallback
-│
-├── orchestrator/
-│   ├── scheduler.py       # 轮询调度 + tick 循环
-│   ├── event_bus.py       # 进程内异步事件总线
-│   └── pipeline.py        # 流水线阶段定义
-│
-├── dashboard/
-│   ├── dashboard.html     # 总控台 SPA (/)
-│   ├── explorer.html      # 数据浏览器 SPA (/explorer)
-│   └── spectrum-os.service # systemd 服务文件
-│
-└── api/
-    ├── app.py             # FastAPI 应用工厂 + 静态页面路由
-    ├── routes.py          # 全部 API 端点
-    └── schemas.py         # 请求/响应模型
-```
-
-## 快速开始
-
-### 1. 安装
-
-```bash
-pip install -e ".[dev]"
-```
-
-### 2. 配置
+需要 Python 3.11+、Node.js 22+、Docker Compose，以及模型和搜索服务的实际凭据。
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入 API keys
+uv sync --extra dev --frozen
+docker compose up -d postgres redis storage
+uv run spectrum migrate
 ```
 
-`.env` 需要的密钥：
+在 `.env` 中配置 `CLAUDE_API_KEY`、`CLAUDE_BASE_URL`、`TAVILY_API_KEY`。模型可以通过 `SPECTRUM_MODEL` 修改；密钥和服务地址对应的环境变量名称也可配置。
 
-```
-CLAUDE_API_KEY=sk-xxx              # Claude via OpenAI-compatible
-CLAUDE_BASE_URL=https://...        # 兼容接口地址
-DEEPSEEK_API_KEY=sk-xxx            # DeepSeek (可选)
-DEEPSEEK_BASE_URL=https://...      # DeepSeek 接口地址 (可选)
-TAVILY_API_KEY=tvly-xxx            # 聚光搜索 — Tavily
-```
-
-代理模型配置在 `config/settings.yaml`，可为每个代理指定不同的 provider/model/temperature。
-
-### 3. 启动
+分别启动以下进程：
 
 ```bash
-# 启动调度器 + API 服务
-spectrum run
-
-# 或直接
-python -m spectrum.main
+uv run spectrum run
+uv run spectrum worker
+uv run spectrum beat
+npm ci --prefix frontend
+npm run build --prefix frontend
+npm run start --prefix frontend
 ```
 
-### 4. 使用
+工作台地址为 `http://127.0.0.1:3000`，API 地址为 `http://127.0.0.1:8078`。本机服务端口分别为 PostgreSQL 55432、Redis 56379、对象存储 59000。
+
+首次检索会下载嵌入模型到 `.work/models`。
+
+## 容器部署
+
+在 `.env` 设置 `SPECTRUM_API_TOKEN`，然后执行：
 
 ```bash
-# 创建课题
-spectrum create-project "scVI 单细胞分析" --domain "生物信息学" --priority P1
-
-# 手动触发代理
-spectrum trigger prism
-
-# 查看状态
-spectrum status
-
-# 查看日志
-spectrum logs
+docker compose --profile app up -d --build
 ```
 
-## API 端点
+部署包含数据库、消息服务、对象存储、迁移、API、工作进程、调度进程和工作台。API 在容器网络监听时要求访问凭据；工作台代理在服务端注入凭据。所有对宿主机开放的端口默认绑定本机地址。对外提供工作台时，应在反向代理配置用户认证和 HTTPS。
 
-所有端点挂载在 `/api` 前缀下。
+对象存储容器使用 MinIO 官方 GitHub 发布文件构建，固定版本和 SHA256，支持 amd64 与 arm64；启动迁移前检查服务健康状态。
 
-### 系统
+## 配置
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/health` | 健康检查，返回已注册代理列表 |
-| POST | `/api/trigger` | 触发代理 `{"agent": "prism"}` |
-| GET | `/api/stats` | 系统统计（各表计数 + 状态分布） |
-| GET | `/api/dashboard/stats` | Dashboard 聚合数据（代理状态、6 库统计、最近记录） |
+v0.5.0 运行配置由 `SPECTRUM_` 前缀环境变量提供，定义见 `src/spectrum/runtime_config.py`。旧 `config/settings.yaml` 用于旧模块，新的入口不读取其中的调度和数据库配置。
 
-### 课题 (Projects)
+| 配置 | 作用 |
+|---|---|
+| `SPECTRUM_DATABASE_URL` | PostgreSQL SQLAlchemy 地址 |
+| `SPECTRUM_REDIS_URL` | Celery 消息服务 |
+| `SPECTRUM_API_TOKEN` | API 访问凭据；前后端进程必须一致 |
+| `SPECTRUM_MODEL` | 模型名称 |
+| `SPECTRUM_MODEL_KEY_ENV` | 模型密钥所在环境变量 |
+| `SPECTRUM_MODEL_BASE_URL_ENV` | 兼容接口地址所在环境变量 |
+| `SPECTRUM_INPUT_PRICE_PER_MILLION` | 输入 Token 每百万单价（美元） |
+| `SPECTRUM_OUTPUT_PRICE_PER_MILLION` | 输出 Token 每百万单价（美元） |
+| `SPECTRUM_S3_ENDPOINT` | S3 兼容服务地址 |
+| `SPECTRUM_OTLP_ENDPOINT` | OTLP HTTP traces 接收地址 |
+| `SPECTRUM_LANGFUSE_ENABLED` | 启用 Langfuse；同时配置其官方环境变量 |
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/projects` | 课题列表 |
-| POST | `/api/projects` | 创建课题 |
-| GET | `/api/projects/{id}` | 课题详情 |
-| PATCH | `/api/projects/{id}` | 更新课题（status / priority / review_needed） |
+模型费用按照配置单价计算；搜索、存储等服务费用由对应服务单独计费。请求结果未知时保留预算预留，恢复操作不会静默重复该模型或搜索请求。
 
-### 任务 (Tasks)
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/tasks` | 任务列表（可选 `?status=&agent=`） |
-| GET | `/api/tasks/browse` | 分页浏览任务（支持 status / agent / type / project_ref 筛选） |
-| PATCH | `/api/tasks/{id}` | 更新任务（status / review_needed） |
-
-### 素材 (Sources)
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/sources` | 手动添加素材 |
-| GET | `/api/sources/list` | 分页浏览素材（支持 status / domain / project_ref 筛选） |
-| GET | `/api/sources/{id}` | 素材详情 |
-| PATCH | `/api/sources/{id}` | 更新素材（status / priority / review_needed） |
-
-### 知识卡 (Wiki Cards)
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/wiki-cards` | 分页浏览知识卡（支持 type / domain / maturity / project_ref 筛选） |
-| GET | `/api/wiki-cards/{id}` | 知识卡详情 |
-| PATCH | `/api/wiki-cards/{id}` | 更新知识卡（maturity / needs_review） |
-
-### 产出 (Outputs)
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/outputs` | 分页浏览产出（支持 status / type / project_ref 筛选） |
-| GET | `/api/outputs/{id}` | 产出详情 |
-| PATCH | `/api/outputs/{id}` | 更新产出（status / review_needed） |
-| GET | `/api/outputs/{id}/markdown` | 下载 Markdown 文件 |
-| GET | `/api/outputs/{id}/html` | HTML 渲染预览 |
-
-### 审批 & 日志
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/reviews` | 统一审批队列（跨 5 张表汇总 review_needed 记录） |
-| GET | `/api/logs` | 分页浏览活动日志（支持 actor / action_type / target_db 筛选） |
-
-## Web 界面
-
-启动后浏览器访问 `http://localhost:8078`：
-
-| 路径 | 页面 | 说明 |
-|------|------|------|
-| `/` | Dashboard 总控台 | 代理运行状态、6 库数据统计、最近活动一屏总览 |
-| `/explorer` | Explorer 数据浏览器 | 分页浏览所有数据表，支持筛选、详情查看、Markdown 渲染 |
-
-## 运行测试
+## 数据迁移
 
 ```bash
-pytest -v
+uv run spectrum import-sqlite /absolute/path/to/spectrum.db
 ```
 
-## 系统铁律
+先完成 `spectrum migrate`，再向空的 PostgreSQL 业务表导入。迁移只读原 SQLite，保留主键，验证外键与记录数量，在事务中完成。关系失效或目标已有业务数据时立即终止。原始文件保留。历史原文需要重新采集后才能生成原文片段和向量索引；历史未完成任务保留为记录，后续研究使用新运行启动。
 
-- **AI 不直接删除** — 只能新建、补充、标记、建议归档
-- **字段写入隔离** — AI 字段与人工字段分离
-- **高风险需审核** — 状态/优先级变更标记 Review Needed
-- **全程留痕** — 所有操作写入 Activity Log
-- **课题驱动** — 所有采集、分析、产出必须关联 Research Project
+## 验证
 
-## 部署
-
+```bash
+uv run pytest checks/ -v
+npm run typecheck --prefix frontend
+npm run build --prefix frontend
 ```
-路径: /opt/spectrum-os/agents/
-端口: 8078 (API + Dashboard + Explorer)
-服务: systemd spectrum-os.service
-```
+
+`checks/` 连接实际 PostgreSQL、S3 和 API，以仓库中的真实 RFC 文档核对保存与检索。检查会新建带有“项目文档核验”名称的课题，并保留审计记录。`tests/` 中保留旧模块的测试，独立于新运行机制。
+
+完整研究验证需要实际模型与搜索凭据；发布验证状态见 `docs/v0.5.0-validation.md`。
+
+## 主要实现
+
+- `orchestrator/workflow.py`：LangGraph 研究节点与确认流程。
+- `orchestrator/worker.py`：消息分发、运行锁、心跳、失败状态。
+- `orchestrator/service.py`：启动、审核、取消与恢复。
+- `db/research.py`：运行、原文、证据、版本与调用记录。
+- `api/research.py`：业务接口、鉴权与 SSE。
+- `tools/knowledge.py`：正文保存与中文混合检索。
+- `frontend/`：Next.js 研究工作台。
+- `migrations/`：Alembic 数据库迁移。
+
+所有变更通过分支与 PR 合入。架构说明见 RFC 001。

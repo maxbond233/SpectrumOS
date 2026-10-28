@@ -1,0 +1,40 @@
+name: v0.5.0 verification
+on:
+  pull_request:
+  push:
+    branches: [master]
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix frontend
+      - run: npm run typecheck --prefix frontend
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - run: uv sync --frozen --extra dev
+      - run: cp .env.example .env
+      - run: docker compose up -d --build --wait postgres redis storage
+      - run: uv run spectrum migrate
+      - run: .venv/bin/spectrum run > api.log 2>&1 &
+      - run: .venv/bin/spectrum worker > worker.log 2>&1 &
+      - run: curl --retry 20 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:8078/api/health
+      - run: uv run pytest checks/ -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: service-logs
+          path: |
+            api.log
+            worker.log

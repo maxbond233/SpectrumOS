@@ -11,3 +11,12 @@ data/
 logs/
 .pytest_cache/
 .ruff_cache/
+.work/
+.venv/
+node_modules/
+.next/
+frontend/out/
+.impeccable/review/
+playwright-report/
+test-results/
+*.tsbuildinfo
